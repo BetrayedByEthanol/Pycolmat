@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from customfmt.rules.final_newline import check, fix, RULE_CODE
+from customfmt.rules.trailing_whitespace import RULE_CODE, check, fix
 
 
 P = Path("f.py")
