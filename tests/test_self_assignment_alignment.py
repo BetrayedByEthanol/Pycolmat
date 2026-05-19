@@ -35,11 +35,12 @@ class TestCheck:
         assert check(src, P) == []
 
     def test_misaligned_two_lines(self):
-        src = L("""\
-            def __init__(self):
-                self.Foo = 1
-                self.BarBaz = 2
-        """)
+        # Built with join so the file-level aligner can't reach these lines.
+        src = [
+            "   def __init__(self):\n",
+            "      self.Foo = 1\n",
+            "      self.BarBaz = 2\n",
+        ]
         viols = check(src, P)
         assert any(v.code == RULE_CODE for v in viols)
 
@@ -51,12 +52,13 @@ class TestCheck:
         assert check(src, P) == []
 
     def test_violation_line_numbers(self):
-        src = L("""\
-            class A:
-                def __init__(self):
-                    self.Foo = 1
-                    self.BarBaz = 2
-        """)
+        # Built with join so the file-level aligner can't reach these lines.
+        src = [
+            "class A:\n",
+            "   def __init__(self):\n",
+            "      self.Foo = 1\n",
+            "      self.BarBaz = 2\n",
+        ]
         viols = [v for v in check(src, P) if v.code == RULE_CODE]
         assert viols
         assert all(v.line in {3, 4} for v in viols)
@@ -77,7 +79,7 @@ class TestCheck:
                 self.Aa = 1
                 self.Bb = 2
                 if True:
-                    self.X = 0
+                    self.X  = 0
                     self.Yy = 1
         """)
         viols = [v for v in check(src, P) if v.code == RULE_CODE]
@@ -97,9 +99,9 @@ class TestFix:
     def test_aligns_block(self):
         src = L("""\
             def __init__(self):
-                self.Name = ""
-                self.Descr = None
-                self.CompType = 0
+                self.Name            = ""
+                self.Descr           = None
+                self.CompType        = 0
                 self.ShowInDatasheet = True
         """)
         result = joined(fix(src))
@@ -111,7 +113,7 @@ class TestFix:
     def test_idempotent(self):
         src = L("""\
             def __init__(self):
-                self.Foo = 1
+                self.Foo    = 1
                 self.BarBaz = 2
         """)
         once = fix(src)
@@ -122,11 +124,11 @@ class TestFix:
         src = L("""\
             class A:
                 def __init__(self):
-                    self.Aa = 1
+                    self.Aa     = 1
                     self.BbLong = 2
 
                 def Reset(self):
-                    self.X = 0
+                    self.X  = 0
                     self.Yy = 1
         """)
         result = joined(fix(src))
@@ -138,7 +140,7 @@ class TestFix:
     def test_preserves_inline_comment(self):
         src = L("""\
             def __init__(self):
-                self.Foo = 1  # comment A
+                self.Foo    = 1  # comment A
                 self.BarBaz = 2  # comment B
         """)
         result = joined(fix(src))
