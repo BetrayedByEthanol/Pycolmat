@@ -261,3 +261,91 @@ class TestAliases:
         f = write(tmp_path / "my_module.py", "X = 1\n")
         rc = main_check([str(f)])
         assert rc == 0
+
+
+# ---------------------------------------------------------------------------
+# customfmt fix --quiet in write mode (file must still be written)
+# ---------------------------------------------------------------------------
+
+class TestFixQuietWrite:
+    def test_quiet_still_writes_file(self, tmp_path):
+        f = write(tmp_path / "a.py", "x = 1   \n")
+        rc = run_fix("--quiet", str(f))
+        assert rc == 0
+        assert f.read_text() == "x = 1\n"
+
+    def test_quiet_produces_no_output(self, tmp_path, capsys):
+        f = write(tmp_path / "a.py", "x = 1   \n")
+        run_fix("--quiet", str(f))
+        out = capsys.readouterr().out
+        assert out.strip() == ""
+
+    def test_quiet_check_no_output_exit_1(self, tmp_path, capsys):
+        f = write(tmp_path / "a.py", "x = 1   \n")
+        rc = run_fix("--quiet", "--check", str(f))
+        assert rc == 1
+        assert capsys.readouterr().out.strip() == ""
+
+
+# ---------------------------------------------------------------------------
+# customfmt fix --diff --quiet (diff output is not suppressed by --quiet)
+# ---------------------------------------------------------------------------
+
+class TestFixDiffQuiet:
+    def test_diff_quiet_suppresses_diff_output(self, tmp_path, capsys):
+        """--quiet suppresses all output including diff; exit code still signals change."""
+        f = write(tmp_path / "a.py", "x = 1   \n")
+        rc = run_fix("--diff", "--quiet", str(f))
+        out = capsys.readouterr().out
+        assert rc == 1          # change detected → exit 1
+        assert out.strip() == ""  # but nothing printed
+
+    def test_diff_without_quiet_prints_diff(self, tmp_path, capsys):
+        """--diff alone (no --quiet) must print the unified diff."""
+        f = write(tmp_path / "a.py", "x = 1   \n")
+        rc = run_fix("--diff", str(f))
+        out = capsys.readouterr().out
+        assert rc == 1
+        assert "---" in out
+
+
+# ---------------------------------------------------------------------------
+# customfmt check --json with syntax-error file
+# ---------------------------------------------------------------------------
+
+class TestCheckJSONSyntaxError:
+    def test_syntax_error_file_partial_results(self, tmp_path, capsys):
+        """
+        A file with a SyntaxError can't be AST-parsed; naming rules skip it
+        silently, but CF009/CF010 (line-based rules) still run.
+        The JSON output must be valid even when some rules can't run.
+        """
+        f = write(tmp_path / "bad_syntax.py", "def (:\n   pass\n")
+        rc = run_check("--json", str(f))
+        out = capsys.readouterr().out
+        data = json.loads(out)   # must be valid JSON
+        assert isinstance(data, list)
+        # CF001 fires because 'bad_syntax.py' is valid snake_case,
+        # but CF010 may fire due to indentation — just verify no crash.
+
+
+# ---------------------------------------------------------------------------
+# CRLF files round-trip correctly through fix
+# ---------------------------------------------------------------------------
+
+class TestCLIFixCRLF:
+    def test_crlf_file_fixed_without_mixing_endings(self, tmp_path):
+        crlf_content = "class A:\r\n   def __init__(self):\r\n      self.Foo = 1\r\n      self.Bar = 2\r\n"
+        f = write(tmp_path / "a.py", crlf_content)
+        # Write in binary to preserve CRLF exactly
+        f.write_bytes(crlf_content.encode("utf-8"))
+        rc = run_fix(str(f))
+        assert rc == 0
+        result = f.read_bytes().decode("utf-8")
+        # No LF-only endings should have been introduced in the aligned block
+        lines_out = result.splitlines(keepends=True)
+        for line in lines_out:
+            if line.strip():
+                assert not (line.endswith("\n") and not line.endswith("\r\n")), (
+                    f"LF-only ending introduced in CRLF file: {line!r}"
+                )

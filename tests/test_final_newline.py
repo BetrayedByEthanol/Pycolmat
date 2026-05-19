@@ -47,3 +47,24 @@ class TestFix:
     def test_idempotent(self):
         src = lines("x = 1")
         assert fix(fix(src)) == fix(src)
+
+
+class TestFixMutationSafety:
+    def test_does_not_mutate_caller_list(self):
+        """fix() must never modify the list passed in."""
+        original = ["x = 1\n", "\n", "\n"]
+        copy = list(original)
+        fix(original)
+        assert original == copy
+
+
+class TestFixCRLF:
+    def test_crlf_file_gets_final_newline(self):
+        src = ["x = 1\r"]  # no newline at all
+        result = fix(src)
+        assert "".join(result).endswith("\n")
+
+    def test_crlf_trailing_blank_stripped(self):
+        src = ["x = 1\r\n", "\r\n", "\r\n"]
+        result = fix(src)
+        assert result == ["x = 1\r\n"]

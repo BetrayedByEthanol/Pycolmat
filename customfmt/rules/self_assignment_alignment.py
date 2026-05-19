@@ -12,6 +12,7 @@ Constraints
 - Single-line blocks are never a violation.
 - Does NOT touch dicts, kwargs, ordinary assignments, or augmented assigns.
 - Does NOT change Python semantics.
+- Handles both LF and CRLF line endings without mixing them.
 """
 
 from __future__ import annotations
@@ -23,7 +24,8 @@ from customfmt.types import Violation
 
 # Matches:  <indent>self.<attr> = <rhs>
 # Does NOT match augmented assigns (+=, -=, …) or == comparisons.
-_RE = re.compile(r"^( *)(self\.[A-Za-z_][A-Za-z0-9_]*) *(=(?!=)) *(.*)")
+# Group 4 captures the rhs *without* any trailing \r or \n.
+_RE = re.compile(r"^( *)(self\.[A-Za-z_][A-Za-z0-9_]*) *(=(?!=)) *(.*?)\r?\n?$")
 
 RULE_CODE = "CF009"
 
@@ -63,6 +65,13 @@ def _iter_blocks(lines: list[str]) -> list[tuple[int, int]]:
     return blocks
 
 
+def _line_ending(line: str) -> str:
+    """Return the line ending (``\r\n`` or ``\n``) of *line*, defaulting to ``\n``."""
+    if line.endswith("\r\n"):
+        return "\r\n"
+    return "\n"
+
+
 def _aligned_block(lines: list[str], start: int, end: int) -> list[str]:
     """Return the slice lines[start..end] with = signs column-aligned."""
     block = lines[start : end + 1]
@@ -70,12 +79,13 @@ def _aligned_block(lines: list[str], start: int, end: int) -> list[str]:
     max_lhs = max(len(m.group(1)) + len(m.group(2)) for m in parsed)  # type: ignore[union-attr]
 
     result = []
-    for m in parsed:
+    for orig_line, m in zip(block, parsed):
         indent = m.group(1)   # type: ignore[union-attr]
         attr   = m.group(2)   # type: ignore[union-attr]
-        rhs    = m.group(4)   # type: ignore[union-attr]
+        rhs    = m.group(4)   # type: ignore[union-attr]  — stripped of \r\n by regex
         pad = " " * (max_lhs - len(indent) - len(attr))
-        result.append(f"{indent}{attr}{pad} = {rhs}\n")
+        ending = _line_ending(orig_line)
+        result.append(f"{indent}{attr}{pad} = {rhs}{ending}")
     return result
 
 

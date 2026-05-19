@@ -29,11 +29,12 @@ def fix(lines: list[str]) -> list[str]:
     """Ensure the file ends with exactly one newline."""
     if not lines:
         return lines
-    # Strip any blank trailing lines, then guarantee exactly one \n
+    # Copy first so we never mutate the caller's list.
+    lines = list(lines)
+    # Strip any blank trailing lines, then guarantee exactly one \n.
     while lines and lines[-1].strip() == "":
-        lines = lines[:-1]
+        lines.pop()
     if not lines:
         return lines
-    lines = list(lines)
     lines[-1] = lines[-1].rstrip("\n") + "\n"
     return lines

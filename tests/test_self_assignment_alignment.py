@@ -191,3 +191,36 @@ class TestFix:
         # Each side is a 1-line block → no padding added
         assert "self.Foo = 1" in result
         assert "self.BarBaz = 2" in result
+
+
+class TestCRLF:
+    def test_crlf_lines_aligned_without_mixing(self):
+        """CRLF line endings must be preserved; LF must not be introduced."""
+        src = [
+            "   def __init__(self):\r\n",
+            "      self.Foo = 1\r\n",
+            "      self.BarBaz = 2\r\n",
+        ]
+        result = fix(src)
+        # Every line in the block should still end with CRLF
+        assert all(line.endswith("\r\n") for line in result[1:])
+
+    def test_crlf_check_no_false_positive_on_ending(self):
+        """A properly aligned CRLF block must not report violations."""
+        src = [
+            "   def __init__(self):\r\n",
+            "      self.Foo    = 1\r\n",
+            "      self.BarBaz = 2\r\n",
+        ]
+        viols = check(src, Path("f.py"))
+        assert not any(v.code == RULE_CODE for v in viols)
+
+    def test_crlf_fix_idempotent(self):
+        src = [
+            "   def __init__(self):\r\n",
+            "      self.Foo = 1\r\n",
+            "      self.BarBaz = 2\r\n",
+        ]
+        once = fix(src)
+        twice = fix(once)
+        assert once == twice
