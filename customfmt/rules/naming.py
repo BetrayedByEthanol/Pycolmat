@@ -39,8 +39,8 @@ from __future__ import annotations
 
 import ast
 import re
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Iterator
 
 from customfmt.types import Violation
 
@@ -74,6 +74,7 @@ def _is_snake_filename(name: str) -> bool:
 # Literal detection
 # ---------------------------------------------------------------------------
 
+
 def _is_literal(node: ast.expr) -> bool:
     """Return True if *node* is a compile-time literal constant."""
     match node:
@@ -83,8 +84,7 @@ def _is_literal(node: ast.expr) -> bool:
             return all(_is_literal(e) for e in elts)
         case ast.Dict(keys=keys, values=values):
             return all(
-                (k is None or _is_literal(k)) and _is_literal(v)
-                for k, v in zip(keys, values)
+                (k is None or _is_literal(k)) and _is_literal(v) for k, v in zip(keys, values)
             )
         case _:
             return False
@@ -93,6 +93,7 @@ def _is_literal(node: ast.expr) -> bool:
 # ---------------------------------------------------------------------------
 # Scope helpers
 # ---------------------------------------------------------------------------
+
 
 def _function_nodes(tree: ast.Module) -> Iterator[ast.FunctionDef | ast.AsyncFunctionDef]:
     """Yield all function/method definition nodes anywhere in the tree."""
@@ -105,6 +106,7 @@ def _function_nodes(tree: ast.Module) -> Iterator[ast.FunctionDef | ast.AsyncFun
 # Main checker
 # ---------------------------------------------------------------------------
 
+
 def check(lines: list[str], path: Path) -> list[Violation]:
     source = "".join(lines)
     violations: list[Violation] = []
@@ -112,13 +114,12 @@ def check(lines: list[str], path: Path) -> list[Violation]:
     # CF001 — file name
     if not _is_snake_filename(path.name):
         violations.append(
-            Violation(path, 0, 0, "CF001",
-                      f"file name must be snake_case.py: {path.name!r}")
+            Violation(path, 0, 0, "CF001", f"file name must be snake_case.py: {path.name!r}")
         )
 
     try:
         tree = ast.parse(source, filename=str(path))
-    except SyntaxError as exc:
+    except SyntaxError:
         # Can't run AST rules on unparseable source.
         return violations
 
@@ -129,18 +130,26 @@ def check(lines: list[str], path: Path) -> list[Violation]:
         if isinstance(node, ast.ClassDef):
             if not _is_pascal(node.name):
                 violations.append(
-                    Violation(path, node.lineno, node.col_offset + 1,
-                              "CF002",
-                              f"class name must be PascalCase: {node.name!r}")
+                    Violation(
+                        path,
+                        node.lineno,
+                        node.col_offset + 1,
+                        "CF002",
+                        f"class name must be PascalCase: {node.name!r}",
+                    )
                 )
 
     # CF003 — function/method names
     for node in _function_nodes(tree):
         if not _is_pascal(node.name):
             violations.append(
-                Violation(path, node.lineno, node.col_offset + 1,
-                          "CF003",
-                          f"function name must be PascalCase: {node.name!r}")
+                Violation(
+                    path,
+                    node.lineno,
+                    node.col_offset + 1,
+                    "CF003",
+                    f"function name must be PascalCase: {node.name!r}",
+                )
             )
 
     # CF004 — parameter names (except self/cls)
@@ -158,9 +167,13 @@ def check(lines: list[str], path: Path) -> list[Violation]:
                 continue
             if not _is_snake(arg.arg):
                 violations.append(
-                    Violation(path, arg.lineno, arg.col_offset + 1,
-                              "CF004",
-                              f"parameter name must be snake_case: {arg.arg!r}")
+                    Violation(
+                        path,
+                        arg.lineno,
+                        arg.col_offset + 1,
+                        "CF004",
+                        f"parameter name must be snake_case: {arg.arg!r}",
+                    )
                 )
 
     # CF005 — local variable names (inside functions)
@@ -189,9 +202,13 @@ def check(lines: list[str], path: Path) -> list[Violation]:
             elif isinstance(node, ast.ExceptHandler):
                 if node.name and not _is_snake(node.name):
                     violations.append(
-                        Violation(path, node.lineno, node.col_offset + 1,
-                                  "CF005",
-                                  f"local variable name must be snake_case: {node.name!r}")
+                        Violation(
+                            path,
+                            node.lineno,
+                            node.col_offset + 1,
+                            "CF005",
+                            f"local variable name must be snake_case: {node.name!r}",
+                        )
                     )
 
     # CF006 — instance attribute names (self.X)
@@ -204,7 +221,9 @@ def check(lines: list[str], path: Path) -> list[Violation]:
                     if not _is_pascal(attr_node.attr):
                         violations.append(
                             Violation(
-                                path, attr_node.lineno, attr_node.col_offset + 1,
+                                path,
+                                attr_node.lineno,
+                                attr_node.col_offset + 1,
                                 "CF006",
                                 f"instance attribute must be PascalCase: {attr_node.attr!r}",
                             )
@@ -218,7 +237,9 @@ def check(lines: list[str], path: Path) -> list[Violation]:
                     if not _is_upper(target.id):
                         violations.append(
                             Violation(
-                                path, target.lineno, target.col_offset + 1,
+                                path,
+                                target.lineno,
+                                target.col_offset + 1,
                                 "CF007",
                                 f"global constant must be UPPER_CASE: {target.id!r}",
                             )
@@ -235,7 +256,9 @@ def check(lines: list[str], path: Path) -> list[Violation]:
                         if not _is_upper(target.id):
                             violations.append(
                                 Violation(
-                                    path, target.lineno, target.col_offset + 1,
+                                    path,
+                                    target.lineno,
+                                    target.col_offset + 1,
                                     "CF008",
                                     f"class constant must be UPPER_CASE: {target.id!r}",
                                 )
@@ -247,6 +270,7 @@ def check(lines: list[str], path: Path) -> list[Violation]:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _check_store_targets(
     target: ast.expr,
@@ -266,7 +290,9 @@ def _check_store_targets(
             if not _is_snake(name):
                 violations.append(
                     Violation(
-                        path, target.lineno, target.col_offset + 1,
+                        path,
+                        target.lineno,
+                        target.col_offset + 1,
                         "CF005",
                         f"local variable name must be snake_case: {name!r}",
                     )

@@ -53,9 +53,7 @@ def collect_files(paths: list[str]) -> list[Path]:
         else:
             for dirpath, dirnames, filenames in os.walk(p):
                 # Prune ignored directories in-place so os.walk skips them.
-                dirnames[:] = [
-                    d for d in sorted(dirnames) if d not in IGNORED_DIRS
-                ]
+                dirnames[:] = [d for d in sorted(dirnames) if d not in IGNORED_DIRS]
                 for fname in sorted(filenames):
                     if fname.endswith(".py"):
                         fp = Path(dirpath) / fname

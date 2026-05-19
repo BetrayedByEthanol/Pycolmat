@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import pytest
 
-from customfmt.discovery import collect_files, IGNORED_DIRS
+from customfmt.discovery import IGNORED_DIRS, collect_files
 
 
 def make_tree(base: Path, structure: dict) -> None:
@@ -25,6 +24,7 @@ def make_tree(base: Path, structure: dict) -> None:
 # ---------------------------------------------------------------------------
 # Basic collection
 # ---------------------------------------------------------------------------
+
 
 class TestCollectFiles:
     def test_single_py_file(self, tmp_path):
@@ -63,6 +63,7 @@ class TestCollectFiles:
 # Ignored directories
 # ---------------------------------------------------------------------------
 
+
 class TestIgnoredDirs:
     @pytest.mark.parametrize("ignored", sorted(IGNORED_DIRS))
     def test_ignored_dir_skipped(self, tmp_path, ignored):
@@ -81,10 +82,13 @@ class TestIgnoredDirs:
         assert not any(p.name == "cached.py" for p in result)
 
     def test_ignored_dir_alongside_valid(self, tmp_path):
-        make_tree(tmp_path, {
-            "src": {"good.py": ""},
-            ".venv": {"hidden.py": ""},
-        })
+        make_tree(
+            tmp_path,
+            {
+                "src": {"good.py": ""},
+                ".venv": {"hidden.py": ""},
+            },
+        )
         result = collect_files([str(tmp_path)])
         names = {p.name for p in result}
         assert "good.py" in names

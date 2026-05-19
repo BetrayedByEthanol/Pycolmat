@@ -34,6 +34,7 @@ RULE_CODE = "CF009"
 # Internal helpers
 # ---------------------------------------------------------------------------
 
+
 def _parse(line: str) -> re.Match | None:
     return _RE.match(line)
 
@@ -80,9 +81,9 @@ def _aligned_block(lines: list[str], start: int, end: int) -> list[str]:
 
     result = []
     for orig_line, m in zip(block, parsed):
-        indent = m.group(1)   # type: ignore[union-attr]
-        attr   = m.group(2)   # type: ignore[union-attr]
-        rhs    = m.group(4)   # type: ignore[union-attr]  — stripped of \r\n by regex
+        indent = m.group(1)  # type: ignore[union-attr]
+        attr = m.group(2)  # type: ignore[union-attr]
+        rhs = m.group(4)  # type: ignore[union-attr]  — stripped of \r\n by regex
         pad = " " * (max_lhs - len(indent) - len(attr))
         ending = _line_ending(orig_line)
         result.append(f"{indent}{attr}{pad} = {rhs}{ending}")
@@ -92,6 +93,7 @@ def _aligned_block(lines: list[str], start: int, end: int) -> list[str]:
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 def check(lines: list[str], path: Path) -> list[Violation]:
     """Return CF009 violations (misaligned blocks)."""

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from customfmt.rules import naming, indentation, self_assignment_alignment
+from customfmt.rules import indentation, naming, self_assignment_alignment
 from customfmt.types import Violation
 
 

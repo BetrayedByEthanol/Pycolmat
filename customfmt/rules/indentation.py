@@ -69,8 +69,7 @@ def check(lines: list[str], path: Path) -> list[Violation]:
         # Tab check
         if "\t" in leading_chars:
             violations.append(
-                Violation(path, lineno, 1, RULE_CODE,
-                          "indentation uses tabs; use spaces instead")
+                Violation(path, lineno, 1, RULE_CODE, "indentation uses tabs; use spaces instead")
             )
             continue  # don't also report width for a tab-indented line
 
@@ -78,7 +77,10 @@ def check(lines: list[str], path: Path) -> list[Violation]:
         if leading % 3 != 0:
             violations.append(
                 Violation(
-                    path, lineno, 1, RULE_CODE,
+                    path,
+                    lineno,
+                    1,
+                    RULE_CODE,
                     f"indentation of {leading} spaces is not a multiple of 3",
                 )
             )

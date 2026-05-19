@@ -5,8 +5,6 @@ from __future__ import annotations
 import textwrap
 from pathlib import Path
 
-import pytest
-
 from customfmt.rules.naming import check
 
 
@@ -29,6 +27,7 @@ def p(name: str) -> Path:
 # CF001 – file name snake_case.py
 # ---------------------------------------------------------------------------
 
+
 class TestCF001:
     def test_valid(self):
         assert not codes_at(check(L("x = 1\n"), p("my_module.py")), "CF001")
@@ -49,6 +48,7 @@ class TestCF001:
 # ---------------------------------------------------------------------------
 # CF002 – class PascalCase
 # ---------------------------------------------------------------------------
+
 
 class TestCF002:
     def test_valid(self):
@@ -76,6 +76,7 @@ class TestCF002:
 # ---------------------------------------------------------------------------
 # CF003 – function/method PascalCase
 # ---------------------------------------------------------------------------
+
 
 class TestCF003:
     def test_valid_function(self):
@@ -109,6 +110,7 @@ class TestCF003:
 # CF004 – parameter names snake_case
 # ---------------------------------------------------------------------------
 
+
 class TestCF004:
     def test_valid(self):
         src = L("def Foo(user_name, count):\n   pass\n")
@@ -134,6 +136,7 @@ class TestCF004:
 # ---------------------------------------------------------------------------
 # CF005 – local variable snake_case
 # ---------------------------------------------------------------------------
+
 
 class TestCF005:
     def test_valid_local(self):
@@ -177,6 +180,7 @@ class TestCF005:
 # CF006 – instance attributes PascalCase
 # ---------------------------------------------------------------------------
 
+
 class TestCF006:
     def test_valid(self):
         src = L("class A:\n   def __init__(self):\n      self.UserName = 'x'\n")
@@ -199,6 +203,7 @@ class TestCF006:
 # ---------------------------------------------------------------------------
 # CF007 – global constants UPPER_CASE
 # ---------------------------------------------------------------------------
+
 
 class TestCF007:
     def test_valid_upper(self):
@@ -242,6 +247,7 @@ class TestCF007:
 # ---------------------------------------------------------------------------
 # CF008 – class constants UPPER_CASE
 # ---------------------------------------------------------------------------
+
 
 class TestCF008:
     def test_valid(self):

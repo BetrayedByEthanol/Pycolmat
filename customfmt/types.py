@@ -13,9 +13,9 @@ class Violation:
     """A single rule violation."""
 
     path: Path
-    line: int     # 1-based
-    col: int      # 1-based (0 when not applicable)
-    code: str     # e.g. "CF001"
+    line: int  # 1-based
+    col: int  # 1-based (0 when not applicable)
+    code: str  # e.g. "CF001"
     message: str  # human-readable description
 
     def __str__(self) -> str:

@@ -24,7 +24,6 @@ import argparse
 import json
 import sys
 import textwrap
-from pathlib import Path
 
 from customfmt import __version__
 from customfmt.checker import check_file
@@ -35,6 +34,7 @@ from customfmt.types import Violation
 # ---------------------------------------------------------------------------
 # Argument parser
 # ---------------------------------------------------------------------------
+
 
 def _build_parser(prog: str = "customfmt") -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -50,9 +50,7 @@ def _build_parser(prog: str = "customfmt") -> argparse.ArgumentParser:
             """
         ),
     )
-    parser.add_argument(
-        "--version", action="version", version=f"customfmt {__version__}"
-    )
+    parser.add_argument("--version", action="version", version=f"customfmt {__version__}")
 
     sub = parser.add_subparsers(dest="command", metavar="COMMAND")
     sub.required = True
@@ -63,9 +61,7 @@ def _build_parser(prog: str = "customfmt") -> argparse.ArgumentParser:
         help="Auto-format files in place.",
         description="Apply safe automatic formatting rules.",
     )
-    fix_p.add_argument(
-        "paths", nargs="+", metavar="PATH", help="Files or directories to process."
-    )
+    fix_p.add_argument("paths", nargs="+", metavar="PATH", help="Files or directories to process.")
     fix_p.add_argument(
         "--check",
         action="store_true",
@@ -76,9 +72,7 @@ def _build_parser(prog: str = "customfmt") -> argparse.ArgumentParser:
         action="store_true",
         help="Show unified diff of proposed changes without writing files.",
     )
-    fix_p.add_argument(
-        "--quiet", "-q", action="store_true", help="Suppress per-file output."
-    )
+    fix_p.add_argument("--quiet", "-q", action="store_true", help="Suppress per-file output.")
 
     # -- check ----------------------------------------------------------------
     chk_p = sub.add_parser(
@@ -86,14 +80,12 @@ def _build_parser(prog: str = "customfmt") -> argparse.ArgumentParser:
         help="Check all custom rules (CF001–CF010).",
         description="Check files against all custom rules. Does not modify files.",
     )
+    chk_p.add_argument("paths", nargs="+", metavar="PATH", help="Files or directories to process.")
+    chk_p.add_argument("--quiet", "-q", action="store_true", help="Suppress per-violation output.")
     chk_p.add_argument(
-        "paths", nargs="+", metavar="PATH", help="Files or directories to process."
-    )
-    chk_p.add_argument(
-        "--quiet", "-q", action="store_true", help="Suppress per-violation output."
-    )
-    chk_p.add_argument(
-        "--json", action="store_true", dest="json_out",
+        "--json",
+        action="store_true",
+        dest="json_out",
         help="Output violations as JSON.",
     )
 
@@ -103,6 +95,7 @@ def _build_parser(prog: str = "customfmt") -> argparse.ArgumentParser:
 # ---------------------------------------------------------------------------
 # Command implementations
 # ---------------------------------------------------------------------------
+
 
 def _cmd_fix(args: argparse.Namespace) -> int:
     try:
@@ -197,6 +190,7 @@ def _cmd_check(args: argparse.Namespace) -> int:
 # ---------------------------------------------------------------------------
 # Entry points
 # ---------------------------------------------------------------------------
+
 
 def main(argv: list[str] | None = None, *, prog: str = "customfmt") -> int:
     parser = _build_parser(prog=prog)

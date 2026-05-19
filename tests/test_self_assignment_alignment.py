@@ -5,8 +5,7 @@ from __future__ import annotations
 import textwrap
 from pathlib import Path
 
-from customfmt.rules.self_assignment_alignment import check, fix, RULE_CODE
-
+from customfmt.rules.self_assignment_alignment import RULE_CODE, check, fix
 
 P = Path("f.py")
 
@@ -22,6 +21,7 @@ def joined(ls: list[str]) -> str:
 # ---------------------------------------------------------------------------
 # check()
 # ---------------------------------------------------------------------------
+
 
 class TestCheck:
     def test_aligned_no_violations(self):
@@ -91,6 +91,7 @@ class TestCheck:
 # ---------------------------------------------------------------------------
 # fix()
 # ---------------------------------------------------------------------------
+
 
 class TestFix:
     def test_aligns_block(self):

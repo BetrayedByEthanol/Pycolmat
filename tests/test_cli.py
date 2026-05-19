@@ -16,17 +16,14 @@ Tests exercise:
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 
-import pytest
-
-from customfmt.cli import main, main_fix, main_check
-
+from customfmt.cli import main, main_check, main_fix
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def write(path: Path, text: str) -> Path:
     path.write_text(text, encoding="utf-8")
@@ -48,6 +45,7 @@ def run_check(*args: str) -> int:
 # ---------------------------------------------------------------------------
 # customfmt fix – write mode
 # ---------------------------------------------------------------------------
+
 
 class TestFixWrite:
     def test_fixes_trailing_whitespace(self, tmp_path):
@@ -98,6 +96,7 @@ class TestFixWrite:
 # customfmt fix --check
 # ---------------------------------------------------------------------------
 
+
 class TestFixCheck:
     def test_clean_exit_0(self, tmp_path):
         f = write(tmp_path / "a.py", "x = 1\n")
@@ -130,6 +129,7 @@ class TestFixCheck:
 # customfmt fix --diff
 # ---------------------------------------------------------------------------
 
+
 class TestFixDiff:
     def test_diff_output(self, tmp_path, capsys):
         f = write(tmp_path / "a.py", "x = 1   \n")
@@ -156,6 +156,7 @@ class TestFixDiff:
 # ---------------------------------------------------------------------------
 # customfmt check
 # ---------------------------------------------------------------------------
+
 
 class TestCheck:
     def test_clean_exit_0(self, tmp_path):
@@ -220,7 +221,7 @@ class TestCheck:
         f = write(tmp_path / "my_module.py", src)
         run_check(str(f))
         out = capsys.readouterr().out
-        lines = [l for l in out.splitlines() if "CF003" in l]
+        lines = [ln for ln in out.splitlines() if "CF003" in ln]
         assert lines
         # should be parseable as "path:line:col CODE message"
         first = lines[0]
@@ -234,6 +235,7 @@ class TestCheck:
 # Exit code 2 on tool errors
 # ---------------------------------------------------------------------------
 
+
 class TestExitCode2:
     def test_fix_bad_path(self, tmp_path):
         assert run_fix(str(tmp_path / "missing.py")) == 2
@@ -245,6 +247,7 @@ class TestExitCode2:
 # ---------------------------------------------------------------------------
 # Aliases
 # ---------------------------------------------------------------------------
+
 
 class TestAliases:
     def test_try_auto_format_fix(self, tmp_path):
@@ -266,6 +269,7 @@ class TestAliases:
 # ---------------------------------------------------------------------------
 # customfmt fix --quiet in write mode (file must still be written)
 # ---------------------------------------------------------------------------
+
 
 class TestFixQuietWrite:
     def test_quiet_still_writes_file(self, tmp_path):
@@ -291,13 +295,14 @@ class TestFixQuietWrite:
 # customfmt fix --diff --quiet (diff output is not suppressed by --quiet)
 # ---------------------------------------------------------------------------
 
+
 class TestFixDiffQuiet:
     def test_diff_quiet_suppresses_diff_output(self, tmp_path, capsys):
         """--quiet suppresses all output including diff; exit code still signals change."""
         f = write(tmp_path / "a.py", "x = 1   \n")
         rc = run_fix("--diff", "--quiet", str(f))
         out = capsys.readouterr().out
-        assert rc == 1          # change detected → exit 1
+        assert rc == 1  # change detected → exit 1
         assert out.strip() == ""  # but nothing printed
 
     def test_diff_without_quiet_prints_diff(self, tmp_path, capsys):
@@ -313,6 +318,7 @@ class TestFixDiffQuiet:
 # customfmt check --json with syntax-error file
 # ---------------------------------------------------------------------------
 
+
 class TestCheckJSONSyntaxError:
     def test_syntax_error_file_partial_results(self, tmp_path, capsys):
         """
@@ -321,9 +327,9 @@ class TestCheckJSONSyntaxError:
         The JSON output must be valid even when some rules can't run.
         """
         f = write(tmp_path / "bad_syntax.py", "def (:\n   pass\n")
-        rc = run_check("--json", str(f))
+        run_check("--json", str(f))
         out = capsys.readouterr().out
-        data = json.loads(out)   # must be valid JSON
+        data = json.loads(out)  # must be valid JSON
         assert isinstance(data, list)
         # CF001 fires because 'bad_syntax.py' is valid snake_case,
         # but CF010 may fire due to indentation — just verify no crash.
@@ -333,9 +339,12 @@ class TestCheckJSONSyntaxError:
 # CRLF files round-trip correctly through fix
 # ---------------------------------------------------------------------------
 
+
 class TestCLIFixCRLF:
     def test_crlf_file_fixed_without_mixing_endings(self, tmp_path):
-        crlf_content = "class A:\r\n   def __init__(self):\r\n      self.Foo = 1\r\n      self.Bar = 2\r\n"
+        crlf_content = (
+            "class A:\r\n   def __init__(self):\r\n      self.Foo = 1\r\n      self.Bar = 2\r\n"
+        )
         f = write(tmp_path / "a.py", crlf_content)
         # Write in binary to preserve CRLF exactly
         f.write_bytes(crlf_content.encode("utf-8"))

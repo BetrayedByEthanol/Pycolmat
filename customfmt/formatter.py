@@ -14,7 +14,7 @@ from __future__ import annotations
 import difflib
 from pathlib import Path
 
-from customfmt.rules import trailing_whitespace, self_assignment_alignment, final_newline
+from customfmt.rules import final_newline, self_assignment_alignment, trailing_whitespace
 from customfmt.types import Violation
 
 

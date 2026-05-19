@@ -19,8 +19,7 @@ def check(lines: list[str], path: Path) -> list[Violation]:
     last = lines[-1]
     if not last.endswith("\n"):
         return [
-            Violation(path, len(lines), len(last) + 1, RULE_CODE,
-                      "missing newline at end of file")
+            Violation(path, len(lines), len(last) + 1, RULE_CODE, "missing newline at end of file")
         ]
     return []
 
