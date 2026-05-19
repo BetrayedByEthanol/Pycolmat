@@ -6,7 +6,6 @@ from pathlib import Path
 
 from customfmt.rules.trailing_whitespace import RULE_CODE, check, fix
 
-
 P = Path("f.py")
 
 

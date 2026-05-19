@@ -5,7 +5,6 @@ from __future__ import annotations
 import textwrap
 from pathlib import Path
 
-
 from customfmt.rules.indentation import check
 
 P = Path("f.py")
