@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "customfmt"
+version = "0.1.0"
+description = "Project-specific Python style formatter and checker"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.11"
+dependencies = []   # stdlib only
+
+[project.scripts]
+customfmt       = "customfmt.cli:_entry_main"
+try-auto-format = "customfmt.cli:_entry_fix"
+check-format    = "customfmt.cli:_entry_check"
+
+[tool.setuptools.packages.find]
+include = ["customfmt*"]
+
+# ---------------------------------------------------------------------------
+# pytest
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+testpaths   = ["tests"]
+addopts     = "-v --tb=short"
+
+# ---------------------------------------------------------------------------
+# Ruff (linting customfmt itself)
+# ---------------------------------------------------------------------------
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP"]
+ignore = ["E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["customfmt"]
