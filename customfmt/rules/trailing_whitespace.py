@@ -19,8 +19,7 @@ def check(lines: list[str], path: Path) -> list[Violation]:
         stripped = line.rstrip("\n")
         if stripped != stripped.rstrip():
             violations.append(
-                Violation(path, i, len(stripped.rstrip()) + 1, RULE_CODE,
-                          "trailing whitespace")
+                Violation(path, i, len(stripped.rstrip()) + 1, RULE_CODE, "trailing whitespace")
             )
     return violations
 
