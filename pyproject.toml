@@ -32,6 +32,8 @@ addopts     = "-v --tb=short"
 [tool.ruff]
 target-version = "py311"
 line-length = 100
+indent-width = 3
+
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP"]

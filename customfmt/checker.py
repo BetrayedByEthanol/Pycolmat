@@ -13,27 +13,27 @@ from customfmt.types import Violation
 
 
 def check_file(path: Path) -> list[Violation]:
-    """
-    Run all check-only rules against *path* and return violations.
+   """
+   Run all check-only rules against *path* and return violations.
 
-    Rules run
-    ---------
-    CF001–CF008  naming conventions (naming.py, AST-based)
-    CF009        self-assignment alignment (self_assignment_alignment.py)
-    CF010        indentation width and style (indentation.py)
-    """
-    source = path.read_text(encoding="utf-8")
-    lines = source.splitlines(keepends=True)
+   Rules run
+   ---------
+   CF001–CF008  naming conventions (naming.py, AST-based)
+   CF009        self-assignment alignment (self_assignment_alignment.py)
+   CF010        indentation width and style (indentation.py)
+   """
+   source = path.read_text(encoding="utf-8")
+   lines = source.splitlines(keepends=True)
 
-    violations: list[Violation] = []
+   violations: list[Violation] = []
 
-    # Naming (CF001–CF008)
-    violations.extend(naming.check(lines, path))
+   # Naming (CF001–CF008)
+   violations.extend(naming.check(lines, path))
 
-    # CF009 alignment
-    violations.extend(self_assignment_alignment.check(lines, path))
+   # CF009 alignment
+   violations.extend(self_assignment_alignment.check(lines, path))
 
-    # CF010 indentation
-    violations.extend(indentation.check(lines, path))
+   # CF010 indentation
+   violations.extend(indentation.check(lines, path))
 
-    return sorted(violations)
+   return sorted(violations)
