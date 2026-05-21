@@ -6,7 +6,7 @@ Auto-fix pipeline (order matters):
   2. self_assignment_alignment – aligns self.X = value blocks
   3. final_newline        – ensures exactly one trailing newline
 
-``process_file`` is the main entry point used by the CLI.
+``ProcessFile`` is the Main entry point used by the CLI.
 """
 
 from __future__ import annotations
@@ -18,27 +18,27 @@ from customfmt.rules import final_newline, self_assignment_alignment, trailing_w
 from customfmt.types import Violation
 
 
-def compute_fixed(lines: list[str]) -> list[str]:
+def ComputeFixed(lines: list[str]) -> list[str]:
    """Apply all auto-fix rules and return the result."""
-   lines = trailing_whitespace.fix(lines)
-   lines = self_assignment_alignment.fix(lines)
-   lines = final_newline.fix(lines)
+   lines = trailing_whitespace.Fix(lines)
+   lines = self_assignment_alignment.Fix(lines)
+   lines = final_newline.Fix(lines)
    return lines
 
 
-def check_fixable(lines: list[str], path: Path) -> list[Violation]:
+def CheckFixable(lines: list[str], path: Path) -> list[Violation]:
    """
-   Return violations that *would* be fixed by ``compute_fixed``.
+   Return violations that *would* be fixed by ``ComputeFixed``.
    Used by ``customfmt fix --check``.
    """
    violations: list[Violation] = []
-   violations.extend(trailing_whitespace.check(lines, path))
-   violations.extend(self_assignment_alignment.check(lines, path))
-   violations.extend(final_newline.check(lines, path))
+   violations.extend(trailing_whitespace.Check(lines, path))
+   violations.extend(self_assignment_alignment.Check(lines, path))
+   violations.extend(final_newline.Check(lines, path))
    return violations
 
 
-def unified_diff(original: list[str], fixed: list[str], path: Path) -> str:
+def UnifiedDiff(original: list[str], fixed: list[str], path: Path) -> str:
    """Return a unified diff string between original and fixed lines."""
    return "".join(
       difflib.unified_diff(
@@ -50,7 +50,7 @@ def unified_diff(original: list[str], fixed: list[str], path: Path) -> str:
    )
 
 
-def process_file(
+def ProcessFile(
    path: Path,
    *,
    check_only: bool = False,
@@ -75,15 +75,15 @@ def process_file(
    original_text = path.read_text(encoding="utf-8")
    lines = original_text.splitlines(keepends=True)
 
-   fixed = compute_fixed(list(lines))
+   fixed = ComputeFixed(list(lines))
    changed = fixed != lines
 
    diff_text = ""
    if diff and changed:
-      diff_text = unified_diff(lines, fixed, path)
+      diff_text = UnifiedDiff(lines, fixed, path)
 
    if check_only:
-      viols = check_fixable(lines, path)
+      viols = CheckFixable(lines, path)
       return changed, diff_text, viols
 
    if changed and not diff:

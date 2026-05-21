@@ -4,7 +4,10 @@ Naming rules (AST-based):
 CF001  file name must be snake_case.py
 CF002  class name must be PascalCase
 CF003  function and method names must be PascalCase
-CF004  parameter names must be snake_case (except self/cls)
+         Exempt: dunder methods matching ^__[A-Za-z0-9_]+__$
+CF004  parameter names must be snake_case
+         self/cls are only exempt when they are the FIRST positional
+         parameter of a method defined directly inside a class body.
 CF005  local variable names must be snake_case
 CF006  instance attributes assigned as self.X must be PascalCase
 CF007  global constants must be UPPER_CASE
@@ -52,22 +55,32 @@ _SNAKE_RE = re.compile(r"^[a-z][a-z0-9]*(_[a-z0-9]+)*$|^[a-z]$")
 _PASCAL_RE = re.compile(r"^[A-Z][A-Za-z0-9]*$")
 _UPPER_RE = re.compile(r"^[A-Z][A-Z0-9]*(_[A-Z0-9]+)*$|^[A-Z]$")
 _SNAKE_FILE_RE = re.compile(r"^[a-z][a-z0-9]*(_[a-z0-9]+)*\.py$|^[a-z]\.py$")
+_DUNDER_RE = re.compile(r"^__[A-Za-z0-9_]+__$")
 
 
-def _is_snake(name: str) -> bool:
+def _IsSnake(name: str) -> bool:
    return bool(_SNAKE_RE.match(name))
 
 
-def _is_pascal(name: str) -> bool:
-   return bool(_PASCAL_RE.match(name))
+def _IsPascal(name: str) -> bool:
+   """Return True if name is PascalCase, allowing leading underscores (_Foo, __Foo)."""
+   stripped = name.lstrip("_")
+   if not stripped:
+      return False
+   return bool(_PASCAL_RE.match(stripped))
 
 
-def _is_upper(name: str) -> bool:
+def _IsUpper(name: str) -> bool:
    return bool(_UPPER_RE.match(name))
 
 
-def _is_snake_filename(name: str) -> bool:
+def _IsSnakeFilename(name: str) -> bool:
    return bool(_SNAKE_FILE_RE.match(name))
+
+
+def _IsDunder(name: str) -> bool:
+   """Return True for names like __init__, __str__, __repr__, etc."""
+   return bool(_DUNDER_RE.match(name))
 
 
 # ---------------------------------------------------------------------------
@@ -75,15 +88,15 @@ def _is_snake_filename(name: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def _is_literal(node: ast.expr) -> bool:
+def _IsLiteral(node: ast.expr) -> bool:
    """Return True if *node* is a compile-time literal constant."""
    match node:
       case ast.Constant():
          return True
       case ast.Tuple(elts=elts) | ast.List(elts=elts) | ast.Set(elts=elts):
-         return all(_is_literal(e) for e in elts)
+         return all(_IsLiteral(e) for e in elts)
       case ast.Dict(keys=keys, values=values):
-         return all((k is None or _is_literal(k)) and _is_literal(v) for k, v in zip(keys, values))
+         return all((k is None or _IsLiteral(k)) and _IsLiteral(v) for k, v in zip(keys, values))
       case _:
          return False
 
@@ -93,11 +106,27 @@ def _is_literal(node: ast.expr) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def _function_nodes(tree: ast.Module) -> Iterator[ast.FunctionDef | ast.AsyncFunctionDef]:
+def _FunctionNodes(
+   tree: ast.Module,
+) -> Iterator[ast.FunctionDef | ast.AsyncFunctionDef]:
    """Yield all function/method definition nodes anywhere in the tree."""
    for node in ast.walk(tree):
       if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
          yield node
+
+
+def _ClassMethodSet(tree: ast.Module) -> set[int]:
+   """
+   Return the set of AST node ids for functions that are *direct* methods
+   of a class (i.e. appear in a ClassDef.body, not in nested functions).
+   """
+   method_ids: set[int] = set()
+   for node in ast.walk(tree):
+      if isinstance(node, ast.ClassDef):
+         for stmt in node.body:
+            if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
+               method_ids.add(id(stmt))
+   return method_ids
 
 
 # ---------------------------------------------------------------------------
@@ -105,14 +134,22 @@ def _function_nodes(tree: ast.Module) -> Iterator[ast.FunctionDef | ast.AsyncFun
 # ---------------------------------------------------------------------------
 
 
-def check(lines: list[str], path: Path) -> list[Violation]:
+def Check(lines: list[str], path: Path) -> list[Violation]:
    source = "".join(lines)
    violations: list[Violation] = []
 
-   # CF001 — file name
-   if not _is_snake_filename(path.name):
+   # CF001 — file name  (line=1, col=1 per spec)
+   # Exempt dunder filenames like __init__.py and __main__.py — these are
+   # required Python conventions that cannot be renamed.
+   if not _IsSnakeFilename(path.name) and not _IsDunder(path.stem):
       violations.append(
-         Violation(path, 0, 0, "CF001", f"file name must be snake_case.py: {path.name!r}")
+         Violation(
+            path,
+            1,
+            1,
+            "CF001",
+            f"file name must be snake_case.py: {path.name!r}",
+         )
       )
 
    try:
@@ -123,10 +160,13 @@ def check(lines: list[str], path: Path) -> list[Violation]:
 
    ast.fix_missing_locations(tree)
 
+   # Pre-compute which function nodes are direct class methods (for CF004).
+   class_methods = _ClassMethodSet(tree)
+
    # CF002 — class names
    for node in ast.walk(tree):
       if isinstance(node, ast.ClassDef):
-         if not _is_pascal(node.name):
+         if not _IsPascal(node.name):
             violations.append(
                Violation(
                   path,
@@ -137,9 +177,11 @@ def check(lines: list[str], path: Path) -> list[Violation]:
                )
             )
 
-   # CF003 — function/method names
-   for node in _function_nodes(tree):
-      if not _is_pascal(node.name):
+   # CF003 — function/method names (dunders are exempt)
+   for node in _FunctionNodes(tree):
+      if _IsDunder(node.name):
+         continue
+      if not _IsPascal(node.name):
          violations.append(
             Violation(
                path,
@@ -150,55 +192,75 @@ def check(lines: list[str], path: Path) -> list[Violation]:
             )
          )
 
-   # CF004 — parameter names (except self/cls)
-   for fn in _function_nodes(tree):
+   # CF004 — parameter names
+   # self/cls are exempt ONLY when they are the first positional argument of
+   # a direct class method.  In any other position they must be treated as
+   # ordinary parameter names.
+   #
+   # Note: "self" and "cls" ARE valid snake_case, so we must explicitly flag
+   # them when they appear outside the exempt position.
+   for fn in _FunctionNodes(tree):
+      is_class_method = id(fn) in class_methods
       args = fn.args
+      # Ordered list of all positional args (posonlyargs first, then args).
+      positional = args.posonlyargs + args.args
+      # All args that need checking: positional + kwonly + *vararg + **kwarg.
       all_args = (
-         args.posonlyargs
-         + args.args
+         positional
          + args.kwonlyargs
          + ([args.vararg] if args.vararg else [])
          + ([args.kwarg] if args.kwarg else [])
       )
+      first_positional_name = positional[0].arg if positional else None
       for arg in all_args:
-         if arg.arg in ("self", "cls"):
+         name = arg.arg
+         # Determine whether this is the exempt self/cls slot.
+         is_exempt_self_cls = (
+            is_class_method and name in ("self", "cls") and name == first_positional_name
+         )
+         if is_exempt_self_cls:
             continue
-         if not _is_snake(arg.arg):
+         # self/cls in a non-exempt position must be flagged explicitly
+         # (they are valid snake_case but should not appear here).
+         if name in ("self", "cls") and not is_exempt_self_cls:
             violations.append(
                Violation(
                   path,
                   arg.lineno,
                   arg.col_offset + 1,
                   "CF004",
-                  f"parameter name must be snake_case: {arg.arg!r}",
+                  f"parameter name must be snake_case: {name!r}",
+               )
+            )
+            continue
+         if not _IsSnake(name):
+            violations.append(
+               Violation(
+                  path,
+                  arg.lineno,
+                  arg.col_offset + 1,
+                  "CF004",
+                  f"parameter name must be snake_case: {name!r}",
                )
             )
 
    # CF005 — local variable names (inside functions)
-   for fn in _function_nodes(tree):
+   for fn in _FunctionNodes(tree):
       for node in ast.walk(fn):
          # Simple assignments: x = …  (skip self.X, obj.attr, etc.)
          if isinstance(node, ast.Assign):
             for target in node.targets:
-               _check_store_targets(target, path, violations)
-
-         # Augmented assignments: x += …
+               _CheckStoreTargets(target, path, violations)
          elif isinstance(node, ast.AugAssign):
-            _check_store_targets(node.target, path, violations)
-
-         # for x in …
+            _CheckStoreTargets(node.target, path, violations)
          elif isinstance(node, ast.For):
-            _check_store_targets(node.target, path, violations)
-
-         # with … as x
+            _CheckStoreTargets(node.target, path, violations)
          elif isinstance(node, ast.With):
             for item in node.items:
                if item.optional_vars is not None:
-                  _check_store_targets(item.optional_vars, path, violations)
-
-         # except … as x
+                  _CheckStoreTargets(item.optional_vars, path, violations)
          elif isinstance(node, ast.ExceptHandler):
-            if node.name and not _is_snake(node.name):
+            if node.name and not _IsSnake(node.name):
                violations.append(
                   Violation(
                      path,
@@ -210,13 +272,13 @@ def check(lines: list[str], path: Path) -> list[Violation]:
                )
 
    # CF006 — instance attribute names (self.X)
-   for fn in _function_nodes(tree):
+   for fn in _FunctionNodes(tree):
       for node in ast.walk(fn):
          if not isinstance(node, ast.Assign):
             continue
          for target in node.targets:
-            for attr_node in _iter_self_attrs(target):
-               if not _is_pascal(attr_node.attr):
+            for attr_node in _IterSelfAttrs(target):
+               if not _IsPascal(attr_node.attr):
                   violations.append(
                      Violation(
                         path,
@@ -228,11 +290,15 @@ def check(lines: list[str], path: Path) -> list[Violation]:
                   )
 
    # CF007 — global constants (module-level)
+   # Exempt dunder names (__version__, __all__, __author__, etc.) — these
+   # are Python ecosystem conventions that cannot be renamed.
    for node in tree.body:
-      if isinstance(node, ast.Assign) and _is_literal(node.value):
+      if isinstance(node, ast.Assign) and _IsLiteral(node.value):
          for target in node.targets:
             if isinstance(target, ast.Name):
-               if not _is_upper(target.id):
+               if _IsDunder(target.id):
+                  continue
+               if not _IsUpper(target.id):
                   violations.append(
                      Violation(
                         path,
@@ -248,10 +314,10 @@ def check(lines: list[str], path: Path) -> list[Violation]:
       if not isinstance(node, ast.ClassDef):
          continue
       for stmt in node.body:
-         if isinstance(stmt, ast.Assign) and _is_literal(stmt.value):
+         if isinstance(stmt, ast.Assign) and _IsLiteral(stmt.value):
             for target in stmt.targets:
                if isinstance(target, ast.Name):
-                  if not _is_upper(target.id):
+                  if not _IsUpper(target.id):
                      violations.append(
                         Violation(
                            path,
@@ -270,22 +336,21 @@ def check(lines: list[str], path: Path) -> list[Violation]:
 # ---------------------------------------------------------------------------
 
 
-def _check_store_targets(
+def _CheckStoreTargets(
    target: ast.expr,
    path: Path,
    violations: list[Violation],
 ) -> None:
    """
-   Walk an assignment target node and emit CF005 for any plain Name nodes
-   that are not snake_case.  Attribute accesses (self.X, obj.attr) are
-   deliberately skipped here (handled by CF006).
+   Walk an assignment target and emit CF005 for non-snake_case Name nodes.
+   Attribute accesses (self.X) are skipped here (handled by CF006).
    """
    match target:
       case ast.Name(id=name):
          # Skip dunders and single-char throwaways like _ or __
          if name.startswith("_"):
             return
-         if not _is_snake(name):
+         if not _IsSnake(name):
             violations.append(
                Violation(
                   path,
@@ -297,22 +362,22 @@ def _check_store_targets(
             )
       case ast.Tuple(elts=elts) | ast.List(elts=elts):
          for elt in elts:
-            _check_store_targets(elt, path, violations)
+            _CheckStoreTargets(elt, path, violations)
       case ast.Starred(value=value):
-         _check_store_targets(value, path, violations)
+         _CheckStoreTargets(value, path, violations)
       case ast.Attribute():
-         pass  # handled by CF006
+         pass
       case _:
          pass
 
 
-def _iter_self_attrs(target: ast.expr) -> Iterator[ast.Attribute]:
+def _IterSelfAttrs(target: ast.expr) -> Iterator[ast.Attribute]:
    """Yield Attribute nodes that are direct self.X accesses."""
    match target:
       case ast.Attribute(value=ast.Name(id="self")) as attr:
          yield attr
       case ast.Tuple(elts=elts) | ast.List(elts=elts):
          for elt in elts:
-            yield from _iter_self_attrs(elt)
+            yield from _IterSelfAttrs(elt)
       case _:
          return

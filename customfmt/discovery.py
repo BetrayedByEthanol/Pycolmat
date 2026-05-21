@@ -26,7 +26,7 @@ IGNORED_DIRS: frozenset[str] = frozenset(
 )
 
 
-def collect_files(paths: list[str]) -> list[Path]:
+def CollectFiles(paths: list[str]) -> list[Path]:
    """
    Expand *paths* into a sorted, deduplicated list of .py files.
 

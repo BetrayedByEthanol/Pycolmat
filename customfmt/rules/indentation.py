@@ -25,7 +25,7 @@ from customfmt.types import Violation
 RULE_CODE = "CF010"
 
 
-def _string_line_ranges(source: str) -> set[int]:
+def _StringLineRanges(source: str) -> set[int]:
    """
    Return the set of 1-based line numbers that are *entirely inside* a
    string literal (i.e. continuation lines of multi-line strings).
@@ -47,9 +47,9 @@ def _string_line_ranges(source: str) -> set[int]:
    return inside
 
 
-def check(lines: list[str], path: Path) -> list[Violation]:
+def Check(lines: list[str], path: Path) -> list[Violation]:
    source = "".join(lines)
-   skip = _string_line_ranges(source)
+   skip = _StringLineRanges(source)
    violations: list[Violation] = []
 
    for lineno, line in enumerate(lines, 1):

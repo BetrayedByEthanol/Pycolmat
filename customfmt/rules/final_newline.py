@@ -13,7 +13,7 @@ from customfmt.types import Violation
 RULE_CODE = "final-newline"  # internal; not a CF0xx check-only rule
 
 
-def check(lines: list[str], path: Path) -> list[Violation]:
+def Check(lines: list[str], path: Path) -> list[Violation]:
    if not lines:
       return []
    last = lines[-1]
@@ -24,7 +24,7 @@ def check(lines: list[str], path: Path) -> list[Violation]:
    return []
 
 
-def fix(lines: list[str]) -> list[str]:
+def Fix(lines: list[str]) -> list[str]:
    """Ensure the file ends with exactly one newline."""
    if not lines:
       return lines

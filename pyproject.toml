@@ -12,9 +12,9 @@ requires-python = ">=3.11"
 dependencies = []   # stdlib only
 
 [project.scripts]
-customfmt       = "customfmt.cli:_entry_main"
-try-auto-format = "customfmt.cli:_entry_fix"
-check-format    = "customfmt.cli:_entry_check"
+customfmt       = "customfmt.cli:_EntryMain"
+try-auto-format = "customfmt.cli:_EntryFix"
+check-format    = "customfmt.cli:_EntryCheck"
 
 [tool.setuptools.packages.find]
 include = ["customfmt*"]
@@ -25,6 +25,8 @@ include = ["customfmt*"]
 [tool.pytest.ini_options]
 testpaths   = ["tests"]
 addopts     = "-v --tb=short"
+python_classes = ["Test*"]
+python_functions = ["Test*"]
 
 # ---------------------------------------------------------------------------
 # Ruff (linting customfmt itself)

@@ -26,9 +26,9 @@ import sys
 import textwrap
 
 from customfmt import __version__
-from customfmt.checker import check_file
-from customfmt.discovery import collect_files
-from customfmt.formatter import process_file
+from customfmt.checker import CheckFile
+from customfmt.discovery import CollectFiles
+from customfmt.formatter import ProcessFile
 from customfmt.types import Violation
 
 # ---------------------------------------------------------------------------
@@ -36,7 +36,7 @@ from customfmt.types import Violation
 # ---------------------------------------------------------------------------
 
 
-def _build_parser(prog: str = "customfmt") -> argparse.ArgumentParser:
+def _BuildParser(prog: str = "customfmt") -> argparse.ArgumentParser:
    parser = argparse.ArgumentParser(
       prog=prog,
       description="Project-specific Python style formatter and checker.",
@@ -97,9 +97,9 @@ def _build_parser(prog: str = "customfmt") -> argparse.ArgumentParser:
 # ---------------------------------------------------------------------------
 
 
-def _cmd_fix(args: argparse.Namespace) -> int:
+def _CmdFix(args: argparse.Namespace) -> int:
    try:
-      files = collect_files(args.paths)
+      files = CollectFiles(args.paths)
    except FileNotFoundError as exc:
       print(f"customfmt: error: {exc}", file=sys.stderr)
       return 2
@@ -114,10 +114,11 @@ def _cmd_fix(args: argparse.Namespace) -> int:
    any_change = False
 
    for path in files:
-      # When --diff or --check: read-only. Otherwise process_file writes in place.
+      # When --diff or --check: read-only (don't write files).
+      # Otherwise ProcessFile writes in place.
       read_only = check_only or show_diff
       try:
-         changed, diff_text, _ = process_file(
+         changed, diff_text, _ = ProcessFile(
             path,
             check_only=read_only,
             diff=show_diff,
@@ -136,14 +137,18 @@ def _cmd_fix(args: argparse.Namespace) -> int:
             else:
                print(f"reformatted {path}")
 
-   if check_only or show_diff:
+   # Exit code rules:
+   #   --check alone or --check --diff  : exit 1 when changes would be made
+   #   --diff alone                     : always exit 0 (diff is informational)
+   #   neither                          : always exit 0 (fix mode)
+   if check_only:
       return 1 if any_change else 0
    return 0
 
 
-def _cmd_check(args: argparse.Namespace) -> int:
+def _CmdCheck(args: argparse.Namespace) -> int:
    try:
-      files = collect_files(args.paths)
+      files = CollectFiles(args.paths)
    except FileNotFoundError as exc:
       print(f"customfmt: error: {exc}", file=sys.stderr)
       return 2
@@ -158,14 +163,14 @@ def _cmd_check(args: argparse.Namespace) -> int:
 
    for path in files:
       try:
-         viols = check_file(path)
+         viols = CheckFile(path)
       except OSError as exc:
          print(f"customfmt: error reading {path}: {exc}", file=sys.stderr)
          return 2
       all_violations.extend(viols)
 
    if json_out:
-      print(json.dumps([v.to_dict() for v in all_violations], indent=2))
+      print(json.dumps([v.ToDict() for v in all_violations], indent=2))
       return 1 if all_violations else 0
 
    if not quiet:
@@ -192,15 +197,15 @@ def _cmd_check(args: argparse.Namespace) -> int:
 # ---------------------------------------------------------------------------
 
 
-def main(argv: list[str] | None = None, *, prog: str = "customfmt") -> int:
-   parser = _build_parser(prog=prog)
+def Main(argv: list[str] | None = None, *, prog: str = "customfmt") -> int:
+   parser = _BuildParser(prog=prog)
    args = parser.parse_args(argv)
 
    try:
       if args.command == "fix":
-         return _cmd_fix(args)
+         return _CmdFix(args)
       elif args.command == "check":
-         return _cmd_check(args)
+         return _CmdCheck(args)
       else:  # pragma: no cover
          parser.print_help()
          return 2
@@ -208,27 +213,27 @@ def main(argv: list[str] | None = None, *, prog: str = "customfmt") -> int:
       return 2
 
 
-def main_fix(argv: list[str] | None = None) -> int:
+def MainFix(argv: list[str] | None = None) -> int:
    """Entry point for ``try-auto-format`` alias."""
    # Prepend "fix" so argparse sees the right sub-command.
    effective = ["fix"] + (sys.argv[1:] if argv is None else argv)
-   return main(effective, prog="try-auto-format")
+   return Main(effective, prog="try-auto-format")
 
 
-def main_check(argv: list[str] | None = None) -> int:
+def MainCheck(argv: list[str] | None = None) -> int:
    """Entry point for ``check-format`` alias."""
    effective = ["check"] + (sys.argv[1:] if argv is None else argv)
-   return main(effective, prog="check-format")
+   return Main(effective, prog="check-format")
 
 
 # Wrappers that call sys.exit so they work as console_scripts.
-def _entry_main() -> None:
-   sys.exit(main())
+def _EntryMain() -> None:
+   sys.exit(Main())
 
 
-def _entry_fix() -> None:
-   sys.exit(main_fix())
+def _EntryFix() -> None:
+   sys.exit(MainFix())
 
 
-def _entry_check() -> None:
-   sys.exit(main_check())
+def _EntryCheck() -> None:
+   sys.exit(MainCheck())

@@ -12,7 +12,7 @@ from customfmt.rules import indentation, naming, self_assignment_alignment
 from customfmt.types import Violation
 
 
-def check_file(path: Path) -> list[Violation]:
+def CheckFile(path: Path) -> list[Violation]:
    """
    Run all check-only rules against *path* and return violations.
 
@@ -28,12 +28,12 @@ def check_file(path: Path) -> list[Violation]:
    violations: list[Violation] = []
 
    # Naming (CF001–CF008)
-   violations.extend(naming.check(lines, path))
+   violations.extend(naming.Check(lines, path))
 
    # CF009 alignment
-   violations.extend(self_assignment_alignment.check(lines, path))
+   violations.extend(self_assignment_alignment.Check(lines, path))
 
    # CF010 indentation
-   violations.extend(indentation.check(lines, path))
+   violations.extend(indentation.Check(lines, path))
 
    return sorted(violations)

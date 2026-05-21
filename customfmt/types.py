@@ -21,7 +21,7 @@ class Violation:
    def __str__(self) -> str:
       return f"{self.path}:{self.line}:{self.col} {self.code} {self.message}"
 
-   def to_dict(self) -> dict:
+   def ToDict(self) -> dict:
       return {
          "path": str(self.path),
          "line": self.line,

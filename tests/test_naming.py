@@ -5,21 +5,18 @@ from __future__ import annotations
 import textwrap
 from pathlib import Path
 
-from customfmt.rules.naming import check
+from customfmt.rules.naming import Check
 
 
 def L(src: str) -> list[str]:
    return textwrap.dedent(src).splitlines(keepends=True)
 
 
-def codes_at(viols, code: str):
+def CodesAt(viols, code: str):
    return [v for v in viols if v.code == code]
 
 
-# ---------------------------------------------------------------------------
-# Helpers to build paths with specific names
-# ---------------------------------------------------------------------------
-def p(name: str) -> Path:
+def P(name: str) -> Path:
    return Path(name)
 
 
@@ -29,20 +26,31 @@ def p(name: str) -> Path:
 
 
 class TestCF001:
-   def test_valid(self):
-      assert not codes_at(check(L("x = 1\n"), p("my_module.py")), "CF001")
+   def TestValid(self):
+      assert not CodesAt(Check(L("x = 1\n"), P("my_module.py")), "CF001")
 
-   def test_invalid_camel(self):
-      assert codes_at(check(L("x = 1\n"), p("MyModule.py")), "CF001")
+   def TestInvalidCamel(self):
+      viols = CodesAt(Check(L("x = 1\n"), P("MyModule.py")), "CF001")
+      assert viols
+      # Fix 4: CF001 must report line=1, col=1
+      assert viols[0].line == 1
+      assert viols[0].col == 1
 
-   def test_invalid_dash(self):
-      assert codes_at(check(L("x = 1\n"), p("my-module.py")), "CF001")
+   def TestInvalidDash(self):
+      assert CodesAt(Check(L("x = 1\n"), P("my-module.py")), "CF001")
 
-   def test_single_word(self):
-      assert not codes_at(check(L("x = 1\n"), p("module.py")), "CF001")
+   def TestSingleWord(self):
+      assert not CodesAt(Check(L("x = 1\n"), P("module.py")), "CF001")
 
-   def test_with_digits(self):
-      assert not codes_at(check(L("x = 1\n"), p("module2.py")), "CF001")
+   def TestWithDigits(self):
+      assert not CodesAt(Check(L("x = 1\n"), P("module2.py")), "CF001")
+
+   def TestLineColNotZero(self):
+      """CF001 must not use line=0,col=0 (old behaviour)."""
+      viols = CodesAt(Check(L("x = 1\n"), P("BadName.py")), "CF001")
+      assert viols
+      assert viols[0].line != 0
+      assert viols[0].col != 0
 
 
 # ---------------------------------------------------------------------------
@@ -51,86 +59,146 @@ class TestCF001:
 
 
 class TestCF002:
-   def test_valid(self):
+   def TestValid(self):
       src = L("class MyClass:\n   pass\n")
-      assert not codes_at(check(src, p("f.py")), "CF002")
+      assert not CodesAt(Check(src, P("f.py")), "CF002")
 
-   def test_invalid_lower(self):
+   def TestInvalidLower(self):
       src = L("class myClass:\n   pass\n")
-      assert codes_at(check(src, p("f.py")), "CF002")
+      assert CodesAt(Check(src, P("f.py")), "CF002")
 
-   def test_invalid_underscore(self):
+   def TestInvalidUnderscore(self):
       src = L("class My_Class:\n   pass\n")
-      assert codes_at(check(src, p("f.py")), "CF002")
+      assert CodesAt(Check(src, P("f.py")), "CF002")
 
-   def test_nested_class(self):
+   def TestNestedClass(self):
       src = L("""\
-            class Outer:
-               class inner:
-                  pass
-        """)
-      viols = codes_at(check(src, p("f.py")), "CF002")
+         class Outer:
+            class inner:
+               pass
+      """)
+      viols = CodesAt(Check(src, P("f.py")), "CF002")
       assert any("inner" in v.message for v in viols)
 
 
 # ---------------------------------------------------------------------------
-# CF003 – function/method PascalCase
+# CF003 – function/method PascalCase  (dunders exempt)
 # ---------------------------------------------------------------------------
 
 
 class TestCF003:
-   def test_valid_function(self):
+   def TestValidFunction(self):
       src = L("def CalculateTotal():\n   pass\n")
-      assert not codes_at(check(src, p("f.py")), "CF003")
+      assert not CodesAt(Check(src, P("f.py")), "CF003")
 
-   def test_invalid_snake(self):
+   def TestInvalidSnake(self):
       src = L("def calculate_total():\n   pass\n")
-      assert codes_at(check(src, p("f.py")), "CF003")
+      assert CodesAt(Check(src, P("f.py")), "CF003")
 
-   def test_dunder_flagged(self):
-      # __init__ is not PascalCase – the rule should flag it
-      # (project convention trumps Python convention here)
+   def TestDunderInitExempt(self):
+      """Fix 1: __init__ must NOT be flagged by CF003."""
       src = L("class A:\n   def __init__(self):\n      pass\n")
-      assert codes_at(check(src, p("f.py")), "CF003")
+      assert not CodesAt(Check(src, P("f.py")), "CF003")
 
-   def test_method_in_class(self):
+   def TestDunderStrExempt(self):
+      src = L("class A:\n   def __str__(self):\n      return ''\n")
+      assert not CodesAt(Check(src, P("f.py")), "CF003")
+
+   def TestDunderReprExempt(self):
+      src = L("class A:\n   def __repr__(self):\n      return ''\n")
+      assert not CodesAt(Check(src, P("f.py")), "CF003")
+
+   def TestDunderEnterExitExempt(self):
       src = L("""\
-            class A:
-               def GoodMethod(self):
-                  pass
-               def bad_method(self):
-                  pass
-        """)
-      viols = codes_at(check(src, p("f.py")), "CF003")
+         class A:
+            def __enter__(self):
+               return self
+            def __exit__(self, exc_type, exc_val, exc_tb):
+               pass
+      """)
+      assert not CodesAt(Check(src, P("f.py")), "CF003")
+
+   def TestArbitraryDunderExempt(self):
+      """Any __foo__ pattern is exempt."""
+      src = L("class A:\n   def __custom_hook__(self):\n      pass\n")
+      assert not CodesAt(Check(src, P("f.py")), "CF003")
+
+   def TestNonDunderSnakeStillFlagged(self):
+      """_private_method and normal snake_case are NOT exempt."""
+      src = L("class A:\n   def bad_method(self):\n      pass\n")
+      assert CodesAt(Check(src, P("f.py")), "CF003")
+
+   def TestMethodInClass(self):
+      src = L("""\
+         class A:
+            def GoodMethod(self):
+               pass
+            def bad_method(self):
+               pass
+      """)
+      viols = CodesAt(Check(src, P("f.py")), "CF003")
       assert any("bad_method" in v.message for v in viols)
       assert not any("GoodMethod" in v.message for v in viols)
 
 
 # ---------------------------------------------------------------------------
 # CF004 – parameter names snake_case
+#         self/cls only exempt as first param of a class method
 # ---------------------------------------------------------------------------
 
 
 class TestCF004:
-   def test_valid(self):
+   def TestValid(self):
       src = L("def Foo(user_name, count):\n   pass\n")
-      assert not codes_at(check(src, p("f.py")), "CF004")
+      assert not CodesAt(Check(src, P("f.py")), "CF004")
 
-   def test_self_cls_exempt(self):
-      src = L("class A:\n   def Foo(self, cls):\n      pass\n")
-      assert not codes_at(check(src, p("f.py")), "CF004")
+   # -- self/cls as first param of a class method: exempt --
+   def TestSelfFirstParamOfClassMethodExempt(self):
+      """Fix 2: self is exempt only as first positional param of a class method."""
+      src = L("class A:\n   def Foo(self):\n      pass\n")
+      assert not CodesAt(Check(src, P("f.py")), "CF004")
 
-   def test_invalid_pascal_param(self):
+   def TestClsFirstParamOfClassMethodExempt(self):
+      src = L("class A:\n   def Foo(cls):\n      pass\n")
+      assert not CodesAt(Check(src, P("f.py")), "CF004")
+
+   # -- self/cls at module level: NOT exempt --
+   def TestSelfInModuleFunctionFlagged(self):
+      """Fix 2: self used in a module-level function must be flagged (CF004)."""
+      src = L("def Foo(self):\n   pass\n")
+      viols = CodesAt(Check(src, P("f.py")), "CF004")
+      assert any("self" in v.message for v in viols)
+
+   def TestClsInModuleFunctionFlagged(self):
+      src = L("def Foo(cls):\n   pass\n")
+      viols = CodesAt(Check(src, P("f.py")), "CF004")
+      assert any("cls" in v.message for v in viols)
+
+   # -- self/cls not in first position: NOT exempt --
+   def TestSelfNotFirstParamFlagged(self):
+      """self as second param of a class method is not exempt."""
+      src = L("class A:\n   def Foo(other, self):\n      pass\n")
+      viols = CodesAt(Check(src, P("f.py")), "CF004")
+      # 'self' is second here → must be flagged
+      assert any("self" in v.message for v in viols)
+
+   def TestInvalidPascalParam(self):
       src = L("def Foo(UserName):\n   pass\n")
-      assert codes_at(check(src, p("f.py")), "CF004")
+      assert CodesAt(Check(src, P("f.py")), "CF004")
 
-   def test_vararg_kwarg(self):
+   def TestVarargKwargValid(self):
       src = L("def Foo(*args, **kwargs):\n   pass\n")
-      assert not codes_at(check(src, p("f.py")), "CF004")
+      assert not CodesAt(Check(src, P("f.py")), "CF004")
 
-   def test_kwonly(self):
+   def TestKwonlyInvalid(self):
       src = L("def Foo(*, BadName):\n   pass\n")
-      assert codes_at(check(src, p("f.py")), "CF004")
+      assert CodesAt(Check(src, P("f.py")), "CF004")
+
+   def TestDunderMethodSelfExempt(self):
+      """self in __init__ (a dunder) should be exempt."""
+      src = L("class A:\n   def __init__(self, value):\n      pass\n")
+      cf004 = CodesAt(Check(src, P("f.py")), "CF004")
+      assert not any("self" in v.message for v in cf004)
 
 
 # ---------------------------------------------------------------------------
@@ -139,39 +207,37 @@ class TestCF004:
 
 
 class TestCF005:
-   def test_valid_local(self):
+   def TestValidLocal(self):
       src = L("def Foo():\n   total_count = 0\n")
-      assert not codes_at(check(src, p("f.py")), "CF005")
+      assert not CodesAt(Check(src, P("f.py")), "CF005")
 
-   def test_invalid_camel(self):
+   def TestInvalidCamel(self):
       src = L("def Foo():\n   totalCount = 0\n")
-      assert codes_at(check(src, p("f.py")), "CF005")
+      assert CodesAt(Check(src, P("f.py")), "CF005")
 
-   def test_for_loop_target(self):
+   def TestForLoopTarget(self):
       src = L("def Foo():\n   for BadItem in []:\n      pass\n")
-      assert codes_at(check(src, p("f.py")), "CF005")
+      assert CodesAt(Check(src, P("f.py")), "CF005")
 
-   def test_with_as_target(self):
+   def TestWithAsTarget(self):
       src = L("def Foo():\n   with open('f') as BadFile:\n      pass\n")
-      assert codes_at(check(src, p("f.py")), "CF005")
+      assert CodesAt(Check(src, P("f.py")), "CF005")
 
-   def test_except_as_target(self):
+   def TestExceptAsTarget(self):
       src = L("def Foo():\n   try:\n      pass\n   except Exception as BadErr:\n      pass\n")
-      assert codes_at(check(src, p("f.py")), "CF005")
+      assert CodesAt(Check(src, P("f.py")), "CF005")
 
-   def test_underscore_skip(self):
-      # _ and __x are skipped
+   def TestUnderscoreSkip(self):
       src = L("def Foo():\n   _ = unused\n")
-      assert not codes_at(check(src, p("f.py")), "CF005")
+      assert not CodesAt(Check(src, P("f.py")), "CF005")
 
-   def test_module_level_not_flagged(self):
-      # Module-level assignments are handled by CF007, not CF005
+   def TestModuleLevelNotFlagged(self):
       src = L("BadName = 1\n")
-      assert not codes_at(check(src, p("f.py")), "CF005")
+      assert not CodesAt(Check(src, P("f.py")), "CF005")
 
-   def test_tuple_unpack(self):
+   def TestTupleUnpack(self):
       src = L("def Foo():\n   good_a, BadB = 1, 2\n")
-      viols = codes_at(check(src, p("f.py")), "CF005")
+      viols = CodesAt(Check(src, P("f.py")), "CF005")
       assert any("BadB" in v.message for v in viols)
       assert not any("good_a" in v.message for v in viols)
 
@@ -182,22 +248,21 @@ class TestCF005:
 
 
 class TestCF006:
-   def test_valid(self):
+   def TestValid(self):
       src = L("class A:\n   def __init__(self):\n      self.UserName = 'x'\n")
-      assert not codes_at(check(src, p("f.py")), "CF006")
+      assert not CodesAt(Check(src, P("f.py")), "CF006")
 
-   def test_invalid_snake(self):
+   def TestInvalidSnake(self):
       src = L("class A:\n   def __init__(self):\n      self.user_name = 'x'\n")
-      assert codes_at(check(src, p("f.py")), "CF006")
+      assert CodesAt(Check(src, P("f.py")), "CF006")
 
-   def test_invalid_lower(self):
+   def TestInvalidLower(self):
       src = L("class A:\n   def __init__(self):\n      self.name = 'x'\n")
-      assert codes_at(check(src, p("f.py")), "CF006")
+      assert CodesAt(Check(src, P("f.py")), "CF006")
 
-   def test_non_self_attr_not_flagged(self):
-      # other.attr is not a self.X assignment → not CF006
+   def TestNonSelfAttrNotFlagged(self):
       src = L("def Foo(other):\n   other.name = 1\n")
-      assert not codes_at(check(src, p("f.py")), "CF006")
+      assert not CodesAt(Check(src, P("f.py")), "CF006")
 
 
 # ---------------------------------------------------------------------------
@@ -206,42 +271,41 @@ class TestCF006:
 
 
 class TestCF007:
-   def test_valid_upper(self):
+   def TestValidUpper(self):
       src = L("DEFAULT_TIMEOUT = 30\n")
-      assert not codes_at(check(src, p("f.py")), "CF007")
+      assert not CodesAt(Check(src, P("f.py")), "CF007")
 
-   def test_invalid_lower(self):
+   def TestInvalidLower(self):
       src = L("default_timeout = 30\n")
-      assert codes_at(check(src, p("f.py")), "CF007")
+      assert CodesAt(Check(src, P("f.py")), "CF007")
 
-   def test_function_call_not_constant(self):
-      # Non-literal RHS → not a constant → CF007 does not apply
+   def TestFunctionCallNotConstant(self):
       src = L("UserName = get_user()\n")
-      assert not codes_at(check(src, p("f.py")), "CF007")
+      assert not CodesAt(Check(src, P("f.py")), "CF007")
 
-   def test_object_construction_not_constant(self):
+   def TestObjectConstructionNotConstant(self):
       src = L("Connection = Database()\n")
-      assert not codes_at(check(src, p("f.py")), "CF007")
+      assert not CodesAt(Check(src, P("f.py")), "CF007")
 
-   def test_list_literal_constant(self):
+   def TestListLiteralConstant(self):
       src = L('OPTIONS = ["a", "b"]\n')
-      assert not codes_at(check(src, p("f.py")), "CF007")
+      assert not CodesAt(Check(src, P("f.py")), "CF007")
 
-   def test_list_literal_bad_name(self):
+   def TestListLiteralBadName(self):
       src = L('options = ["a", "b"]\n')
-      assert codes_at(check(src, p("f.py")), "CF007")
+      assert CodesAt(Check(src, P("f.py")), "CF007")
 
-   def test_nested_literal(self):
+   def TestNestedLiteral(self):
       src = L("MATRIX = ((1, 2), (3, 4))\n")
-      assert not codes_at(check(src, p("f.py")), "CF007")
+      assert not CodesAt(Check(src, P("f.py")), "CF007")
 
-   def test_none_literal(self):
+   def TestNoneLiteral(self):
       src = L("DEFAULT_VALUE = None\n")
-      assert not codes_at(check(src, p("f.py")), "CF007")
+      assert not CodesAt(Check(src, P("f.py")), "CF007")
 
-   def test_bool_literal(self):
+   def TestBoolLiteral(self):
       src = L("ENABLED = True\n")
-      assert not codes_at(check(src, p("f.py")), "CF007")
+      assert not CodesAt(Check(src, P("f.py")), "CF007")
 
 
 # ---------------------------------------------------------------------------
@@ -250,19 +314,18 @@ class TestCF007:
 
 
 class TestCF008:
-   def test_valid(self):
+   def TestValid(self):
       src = L("class A:\n   MAX_RETRIES = 3\n")
-      assert not codes_at(check(src, p("f.py")), "CF008")
+      assert not CodesAt(Check(src, P("f.py")), "CF008")
 
-   def test_invalid(self):
+   def TestInvalid(self):
       src = L("class A:\n   max_retries = 3\n")
-      assert codes_at(check(src, p("f.py")), "CF008")
+      assert CodesAt(Check(src, P("f.py")), "CF008")
 
-   def test_method_body_not_flagged(self):
-      # Assignments inside methods are handled by CF005, not CF008
+   def TestMethodBodyNotFlagged(self):
       src = L("class A:\n   def Foo(self):\n      local_var = 1\n")
-      assert not codes_at(check(src, p("f.py")), "CF008")
+      assert not CodesAt(Check(src, P("f.py")), "CF008")
 
-   def test_non_literal_not_constant(self):
+   def TestNonLiteralNotConstant(self):
       src = L("class A:\n   Connection = Database()\n")
-      assert not codes_at(check(src, p("f.py")), "CF008")
+      assert not CodesAt(Check(src, P("f.py")), "CF008")
