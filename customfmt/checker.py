@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from customfmt.io import ReadUtf8Bytes
+from customfmt.io import UTF8_BOM, ReadUtf8Bytes
 from customfmt.rules import indentation, line_endings, naming, self_assignment_alignment
 from customfmt.types import Violation
 
@@ -42,8 +42,11 @@ def CheckFile(path: Path) -> list[Violation]:
    if has_invalid_utf8:
       return sorted(violations)
 
-   # Decode safely — strip BOM if present (already reported above).
-   text = raw.lstrip(b"\xef\xbb\xbf").decode("utf-8")
+   # Decode safely — remove exact BOM prefix if present (already reported above).
+   if raw.startswith(UTF8_BOM):
+      text = raw[len(UTF8_BOM) :].decode("utf-8")
+   else:
+      text = raw.decode("utf-8")
    lines = text.splitlines(keepends=True)
 
    # Naming (CF001–CF008)

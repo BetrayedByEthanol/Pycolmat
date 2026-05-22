@@ -292,11 +292,13 @@ class TestCliIntegration:
       assert b"\r\n" in f.read_bytes()
 
    def TestFixBadUtf8Exits2(self, tmp_path):
+      """try-auto-format refuses invalid UTF-8 and exits 2 (encoding unsafe)."""
       f = Write(tmp_path / "f.py", b"x = \xff\n")
       rc = RunMain("fix", str(f))
       assert rc == 2
 
    def TestFixBomExits2(self, tmp_path):
+      """try-auto-format refuses UTF-8 BOM and exits 2 (encoding unsafe)."""
       f = Write(tmp_path / "f.py", UTF8_BOM + b"x = 1\n")
       rc = RunMain("fix", str(f))
       assert rc == 2
@@ -307,14 +309,53 @@ class TestCliIntegration:
       assert rc == 1
 
    def TestCheckCf012BomExits1(self, tmp_path):
+      """check-format reports CF012 for UTF-8 BOM and exits 1."""
       f = Write(tmp_path / "my_module.py", UTF8_BOM + b"X = 1\n")
       rc = RunMain("check", str(f))
       assert rc == 1
 
    def TestCheckCf012BadUtf8Exits1(self, tmp_path):
+      """check-format reports CF012 for invalid UTF-8 and exits 1."""
       f = Write(tmp_path / "my_module.py", b"x = \xff\n")
       rc = RunMain("check", str(f))
       assert rc == 1
+
+   def TestFixBadUtf8PrintsErrorToStderr(self, tmp_path, capsys):
+      """try-auto-format prints a clear error to stderr for invalid UTF-8."""
+      f = Write(tmp_path / "f.py", b"x = \xff\n")
+      rc = RunMain("fix", str(f))
+      assert rc == 2
+      err = capsys.readouterr().err
+      assert str(f) in err
+
+   def TestFixBomPrintsErrorToStderr(self, tmp_path, capsys):
+      """try-auto-format prints a clear error to stderr for UTF-8 BOM."""
+      f = Write(tmp_path / "f.py", UTF8_BOM + b"x = 1\n")
+      rc = RunMain("fix", str(f))
+      assert rc == 2
+      err = capsys.readouterr().err
+      assert str(f) in err
+
+   def TestFixEncodingErrorDoesNotModifyFile(self, tmp_path):
+      """try-auto-format must not write a partial or corrupted file on encoding error."""
+      original = b"x = \xff\n"
+      f = Write(tmp_path / "f.py", original)
+      RunMain("fix", str(f))
+      assert f.read_bytes() == original
+
+   def TestCheckCf012BomOutputContainsCode(self, tmp_path, capsys):
+      """check-format output for BOM file must contain 'CF012'."""
+      f = Write(tmp_path / "my_module.py", UTF8_BOM + b"X = 1\n")
+      RunMain("check", str(f))
+      out = capsys.readouterr().out
+      assert "CF012" in out
+
+   def TestCheckCf012BadUtf8OutputContainsCode(self, tmp_path, capsys):
+      """check-format output for invalid UTF-8 file must contain 'CF012'."""
+      f = Write(tmp_path / "my_module.py", b"x = \xff\n")
+      RunMain("check", str(f))
+      out = capsys.readouterr().out
+      assert "CF012" in out
 
    def TestCheckLfCleanExits0(self, tmp_path):
       f = Write(tmp_path / "my_module.py", b"X = 1\n")

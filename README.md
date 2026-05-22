@@ -261,6 +261,26 @@ jobs:
 | `1`  | Violations found (`check`) or changes needed (`fix --check`)    |
 | `2`  | Tool / runtime error (bad path, I/O error, no .py files found)  |
 
+### Encoding and exit codes
+
+`check-format` (and `customfmt check`) treats encoding problems as **style
+violations**, not tool errors. A file with a UTF-8 BOM or invalid UTF-8 bytes
+is reported as CF012 and causes **exit 1** — the same as any other rule
+violation. This lets CI treat encoding issues identically to naming or
+indentation issues.
+
+`try-auto-format` (and `customfmt fix`) refuses to touch a file whose
+encoding is broken:
+
+- **Invalid UTF-8** — the bytes cannot be decoded at all; rewriting the file
+  would corrupt or lose data. Exit **2**.
+- **UTF-8 BOM** — silently removing a BOM could change the meaning of files
+  that depend on it (some Windows tools use the BOM as an encoding marker).
+  Exit **2** so the developer makes the choice explicitly.
+
+In both cases a clear error message is printed to `stderr` identifying the
+file and the problem.
+
 ---
 
 ## Project structure

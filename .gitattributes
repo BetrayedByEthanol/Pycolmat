@@ -2,7 +2,7 @@
 # Git line-ending policy
 #
 # All text files are stored in the repository with LF endings.
-# Git will not perform any CRLF conversion on checkout or commit.
+# Git normalizes text files to LF and checks them out as LF.
 # This matches the project's CF011 rule: LF only in .py files.
 # ---------------------------------------------------------------------------
 
