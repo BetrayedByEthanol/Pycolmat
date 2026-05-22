@@ -94,6 +94,7 @@ src/user_model.py:7:1 CF010 indentation of 4 spaces is not a multiple of 3
 | trailing-whitespace    | Remove trailing spaces/tabs on every line                     |
 | self-alignment         | Align contiguous `self.X = value` blocks (same indent)        |
 | final-newline          | Ensure exactly one newline at end of file                     |
+| line-endings           | Convert CRLF and bare CR line endings to LF                   |
 
 ### Check-only rules (reported by `customfmt check`)
 
@@ -109,6 +110,8 @@ src/user_model.py:7:1 CF010 indentation of 4 spaces is not a multiple of 3
 | CF008 | Class-body literal constants must be `UPPER_CASE`                 |
 | CF009 | `self.X = value` assignment blocks must be aligned                |
 | CF010 | Indentation must use spaces; width must be a multiple of 3        |
+| CF011 | File must use LF line endings only (no CRLF or bare CR)           |
+| CF012 | File must be valid UTF-8 without BOM                              |
 
 ### Naming convention reference
 

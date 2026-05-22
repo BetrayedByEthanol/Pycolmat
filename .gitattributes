@@ -1,0 +1,32 @@
+# ---------------------------------------------------------------------------
+# Git line-ending policy
+#
+# All text files are stored in the repository with LF endings.
+# Git will not perform any CRLF conversion on checkout or commit.
+# This matches the project's CF011 rule: LF only in .py files.
+# ---------------------------------------------------------------------------
+
+# Default: normalise all text files to LF in the repo.
+* text=auto eol=lf
+
+# Explicitly LF for all source and config files.
+*.py        text eol=lf
+*.toml      text eol=lf
+*.yaml      text eol=lf
+*.yml       text eol=lf
+*.md        text eol=lf
+*.txt       text eol=lf
+*.cfg       text eol=lf
+*.ini       text eol=lf
+*.json      text eol=lf
+.gitattributes text eol=lf
+.editorconfig  text eol=lf
+
+# Binary files – no line-ending conversion.
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.whl  binary
+*.pyc  binary

@@ -2,11 +2,14 @@
 Formatter: orchestrates all auto-fixable rules.
 
 Auto-fix pipeline (order matters):
-  1. trailing_whitespace  – strips trailing spaces/tabs
-  2. self_assignment_alignment – aligns self.X = value blocks
-  3. final_newline        – ensures exactly one trailing newline
+  0. Read raw bytes, decode as UTF-8 without BOM (error on BOM / bad bytes).
+  1. line_endings.FixText   – normalise CRLF / CR  →  LF
+  2. trailing_whitespace    – strip trailing spaces/tabs
+  3. self_assignment_alignment – align self.X = value blocks
+  4. final_newline          – ensure exactly one trailing newline
+  5. Write UTF-8, LF only via WriteUtf8Lf.
 
-``ProcessFile`` is the Main entry point used by the CLI.
+ProcessFile is the main entry point used by the CLI.
 """
 
 from __future__ import annotations
@@ -14,36 +17,50 @@ from __future__ import annotations
 import difflib
 from pathlib import Path
 
-from customfmt.rules import final_newline, self_assignment_alignment, trailing_whitespace
+from customfmt.io import ReadUtf8Text, WriteUtf8Lf
+from customfmt.rules import (
+   final_newline,
+   line_endings,
+   self_assignment_alignment,
+   trailing_whitespace,
+)
 from customfmt.types import Violation
 
 
-def ComputeFixed(lines: list[str]) -> list[str]:
-   """Apply all auto-fix rules and return the result."""
+def ComputeFixed(text: str) -> str:
+   """
+   Apply all auto-fix rules to *text* (already decoded, no BOM) and
+   return the corrected text.
+   """
+   text = line_endings.FixText(text)
+   lines = text.splitlines(keepends=True)
    lines = trailing_whitespace.Fix(lines)
    lines = self_assignment_alignment.Fix(lines)
    lines = final_newline.Fix(lines)
-   return lines
+   return "".join(lines)
 
 
-def CheckFixable(lines: list[str], path: Path) -> list[Violation]:
+def CheckFixable(text: str, path: Path) -> list[Violation]:
    """
-   Return violations that *would* be fixed by ``ComputeFixed``.
+   Return violations that *would* be fixed by ComputeFixed.
    Used by ``customfmt fix --check``.
    """
    violations: list[Violation] = []
+   raw = text.encode("utf-8")
+   violations.extend(line_endings.CheckBytes(raw, path))
+   lines = text.splitlines(keepends=True)
    violations.extend(trailing_whitespace.Check(lines, path))
    violations.extend(self_assignment_alignment.Check(lines, path))
    violations.extend(final_newline.Check(lines, path))
    return violations
 
 
-def UnifiedDiff(original: list[str], fixed: list[str], path: Path) -> str:
-   """Return a unified diff string between original and fixed lines."""
+def UnifiedDiff(original: str, fixed: str, path: Path) -> str:
+   """Return a unified diff string between original and fixed text."""
    return "".join(
       difflib.unified_diff(
-         original,
-         fixed,
+         original.splitlines(keepends=True),
+         fixed.splitlines(keepends=True),
          fromfile=f"a/{path}",
          tofile=f"b/{path}",
       )
@@ -59,34 +76,27 @@ def ProcessFile(
    """
    Read *path*, optionally fix it.
 
-   Parameters
-   ----------
-   path        : file to process
-   check_only  : if True, do not write changes (``fix --check`` mode)
-   diff        : if True, compute unified diff instead of writing
+   Returns (changed, diff_text, violations).
 
-   Returns
-   -------
-   (changed, diff_text, violations)
-     changed    – True if file content differs after fixing
-     diff_text  – unified diff (only when diff=True)
-     violations – violations found (only populated when check_only=True)
+   Raises
+   ------
+   ValueError          if the file has a UTF-8 BOM.
+   UnicodeDecodeError  if the file is not valid UTF-8.
+   OSError             on I/O failure.
    """
-   original_text = path.read_text(encoding="utf-8")
-   lines = original_text.splitlines(keepends=True)
-
-   fixed = ComputeFixed(list(lines))
-   changed = fixed != lines
+   original_text = ReadUtf8Text(path)
+   fixed_text = ComputeFixed(original_text)
+   changed = fixed_text != original_text
 
    diff_text = ""
    if diff and changed:
-      diff_text = UnifiedDiff(lines, fixed, path)
+      diff_text = UnifiedDiff(original_text, fixed_text, path)
 
    if check_only:
-      viols = CheckFixable(lines, path)
+      viols = CheckFixable(original_text, path)
       return changed, diff_text, viols
 
    if changed and not diff:
-      path.write_text("".join(fixed), encoding="utf-8")
+      WriteUtf8Lf(path, fixed_text)
 
    return changed, diff_text, []

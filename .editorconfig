@@ -1,0 +1,41 @@
+# EditorConfig — https://editorconfig.org
+# Editors that support this file will automatically apply these settings,
+# keeping them in sync with the project's CF010, CF011, and CF012 rules.
+
+root = true
+
+# ----------------------------------------------------------------------------
+# All files: UTF-8, LF, final newline, trim trailing whitespace.
+# ----------------------------------------------------------------------------
+[*]
+charset             = utf-8
+end_of_line         = lf
+insert_final_newline  = true
+trim_trailing_whitespace = true
+
+# ----------------------------------------------------------------------------
+# Python: 3-space indentation (CF010).
+# ----------------------------------------------------------------------------
+[*.py]
+indent_style = space
+indent_size  = 3
+
+# ----------------------------------------------------------------------------
+# TOML / YAML / Markdown / plain text: 3-space indent (matches project style).
+# ----------------------------------------------------------------------------
+[*.toml]
+indent_style = space
+indent_size  = 3
+
+[*.{yaml,yml}]
+indent_style = space
+indent_size  = 2
+
+[*.md]
+indent_style = space
+indent_size  = 2
+trim_trailing_whitespace = false
+
+[*.{txt,cfg,ini}]
+indent_style = space
+indent_size  = 3

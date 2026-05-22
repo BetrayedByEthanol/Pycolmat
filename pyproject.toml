@@ -23,10 +23,11 @@ include = ["customfmt*"]
 # pytest
 # ---------------------------------------------------------------------------
 [tool.pytest.ini_options]
-testpaths   = ["tests"]
-addopts     = "-v --tb=short"
-python_classes = ["Test*"]
-python_functions = ["Test*"]
+testpaths        = ["tests"]
+addopts          = "-v --tb=short"
+python_files     = "test_*.py"
+python_classes   = "Test*"
+python_functions = "Test*"
 
 # ---------------------------------------------------------------------------
 # Ruff (linting customfmt itself)

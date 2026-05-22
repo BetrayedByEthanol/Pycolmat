@@ -123,8 +123,8 @@ def _CmdFix(args: argparse.Namespace) -> int:
             check_only=read_only,
             diff=show_diff,
          )
-      except OSError as exc:
-         print(f"customfmt: error reading {path}: {exc}", file=sys.stderr)
+      except (OSError, UnicodeDecodeError, ValueError) as exc:
+         print(f"customfmt: error: {path}: {exc}", file=sys.stderr)
          return 2
 
       if changed:
@@ -164,8 +164,8 @@ def _CmdCheck(args: argparse.Namespace) -> int:
    for path in files:
       try:
          viols = CheckFile(path)
-      except OSError as exc:
-         print(f"customfmt: error reading {path}: {exc}", file=sys.stderr)
+      except (OSError, UnicodeDecodeError, ValueError) as exc:
+         print(f"customfmt: error: {path}: {exc}", file=sys.stderr)
          return 2
       all_violations.extend(viols)
 
