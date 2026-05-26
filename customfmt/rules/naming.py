@@ -317,6 +317,8 @@ def Check(lines: list[str], path: Path) -> list[Violation]:
          if isinstance(stmt, ast.Assign) and _IsLiteral(stmt.value):
             for target in stmt.targets:
                if isinstance(target, ast.Name):
+                  if _IsDunder(target.id):
+                     continue
                   if not _IsUpper(target.id):
                      violations.append(
                         Violation(

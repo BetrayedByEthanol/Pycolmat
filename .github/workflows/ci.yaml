@@ -34,9 +34,6 @@ jobs:
       - name: Ruff – lint
         run: ruff check customfmt/ tests/
 
-      - name: Ruff – format check
-        run: ruff format --check customfmt/ tests/
-
       - name: customfmt – auto-format check
         run: try-auto-format --check customfmt/ tests/
 

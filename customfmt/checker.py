@@ -1,5 +1,5 @@
 """
-Checker: orchestrates all check-only rules (CF001–CF012).
+Checker: orchestrates all check-only rules (CF001–CF015).
 
 CheckFile is the main entry point used by the CLI.
 """
@@ -9,7 +9,14 @@ from __future__ import annotations
 from pathlib import Path
 
 from customfmt.io import UTF8_BOM, ReadUtf8Bytes
-from customfmt.rules import indentation, line_endings, naming, self_assignment_alignment
+from customfmt.rules import (
+   class_body_alignment,
+   hoisting,
+   indentation,
+   line_endings,
+   naming,
+   self_assignment_alignment,
+)
 from customfmt.types import Violation
 
 
@@ -24,6 +31,9 @@ def CheckFile(path: Path) -> list[Violation]:
    CF001–CF008  naming conventions (naming.py, AST-based)
    CF009        self-assignment alignment (self_assignment_alignment.py)
    CF010        indentation width and style (indentation.py)
+   CF013        class-body declaration alignment (class_body_alignment.py)
+   CF014        top-level declaration hoisting (hoisting.py)
+   CF015        class-body declaration hoisting (hoisting.py)
 
    If CF012 is reported (invalid UTF-8), AST-based rules are skipped
    because the source cannot be parsed.
@@ -47,6 +57,16 @@ def CheckFile(path: Path) -> list[Violation]:
       text = raw[len(UTF8_BOM) :].decode("utf-8")
    else:
       text = raw.decode("utf-8")
+
+   # If CF011 was reported, normalise line endings before running text-based
+   # rules so that CRLF does not cause spurious CF009 / CF010 violations.
+   # We still report CF011 — we just don't want noisy duplicates.
+   has_cf011 = any(v.code == "CF011" for v in encoding_viols)
+   if has_cf011:
+      from customfmt.rules.line_endings import FixText
+
+      text = FixText(text)
+
    lines = text.splitlines(keepends=True)
 
    # Naming (CF001–CF008)
@@ -54,6 +74,12 @@ def CheckFile(path: Path) -> list[Violation]:
 
    # CF009 alignment
    violations.extend(self_assignment_alignment.Check(lines, path))
+
+   # CF013 class-body alignment
+   violations.extend(class_body_alignment.Check(lines, path))
+
+   # CF014 / CF015 declaration hoisting
+   violations.extend(hoisting.Check(lines, path))
 
    # CF010 indentation
    violations.extend(indentation.Check(lines, path))

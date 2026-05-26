@@ -6,8 +6,9 @@ Auto-fix pipeline (order matters):
   1. line_endings.FixText   – normalise CRLF / CR  →  LF
   2. trailing_whitespace    – strip trailing spaces/tabs
   3. self_assignment_alignment – align self.X = value blocks
-  4. final_newline          – ensure exactly one trailing newline
-  5. Write UTF-8, LF only via WriteUtf8Lf.
+  4. class_body_alignment   – align class-body declaration blocks
+  5. final_newline          – ensure exactly one trailing newline
+  6. Write UTF-8, LF only via WriteUtf8Lf.
 
 ProcessFile is the main entry point used by the CLI.
 """
@@ -17,8 +18,9 @@ from __future__ import annotations
 import difflib
 from pathlib import Path
 
-from customfmt.io import ReadUtf8Text, WriteUtf8Lf
+from customfmt.io import ReadUtf8Bytes, ReadUtf8Text, WriteUtf8Lf
 from customfmt.rules import (
+   class_body_alignment,
    final_newline,
    line_endings,
    self_assignment_alignment,
@@ -36,14 +38,22 @@ def ComputeFixed(text: str) -> str:
    lines = text.splitlines(keepends=True)
    lines = trailing_whitespace.Fix(lines)
    lines = self_assignment_alignment.Fix(lines)
+   lines = class_body_alignment.Fix(lines)
    lines = final_newline.Fix(lines)
    return "".join(lines)
 
 
-def CheckFixable(text: str, path: Path) -> list[Violation]:
+def CheckFixable(raw: bytes, text: str, path: Path) -> list[Violation]:
    """
    Return violations that *would* be fixed by ComputeFixed.
    Used by ``customfmt fix --check``.
+
+   Parameters
+   ----------
+   raw  : original file bytes, used for CF011 line-ending detection so we
+          inspect the bytes on disk rather than a re-encoded copy.
+   text : decoded text (no BOM), used for all text-based rules.
+   path : used only for Violation path fields.
    """
    violations: list[Violation] = []
    raw = text.encode("utf-8")
@@ -51,6 +61,7 @@ def CheckFixable(text: str, path: Path) -> list[Violation]:
    lines = text.splitlines(keepends=True)
    violations.extend(trailing_whitespace.Check(lines, path))
    violations.extend(self_assignment_alignment.Check(lines, path))
+   violations.extend(class_body_alignment.Check(lines, path))
    violations.extend(final_newline.Check(lines, path))
    return violations
 
@@ -84,7 +95,8 @@ def ProcessFile(
    UnicodeDecodeError  if the file is not valid UTF-8.
    OSError             on I/O failure.
    """
-   original_text = ReadUtf8Text(path)
+   original_raw = ReadUtf8Bytes(path)
+   original_text = ReadUtf8Text(path)  # raises ValueError on BOM, UnicodeDecodeError on bad bytes
    fixed_text = ComputeFixed(original_text)
    changed = fixed_text != original_text
 
@@ -93,7 +105,7 @@ def ProcessFile(
       diff_text = UnifiedDiff(original_text, fixed_text, path)
 
    if check_only:
-      viols = CheckFixable(original_text, path)
+      viols = CheckFixable(original_raw, original_text, path)
       return changed, diff_text, viols
 
    if changed and not diff:

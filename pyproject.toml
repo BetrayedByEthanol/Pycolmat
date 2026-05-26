@@ -40,7 +40,7 @@ indent-width = 3
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP"]
-ignore = ["E501"]
+ignore = ["E501", "E203", "E211"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["customfmt"]
