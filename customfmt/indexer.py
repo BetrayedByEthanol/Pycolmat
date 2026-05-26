@@ -9,11 +9,9 @@ each, and aggregates results into an IndexResult.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from customfmt.discovery import CollectFiles
 from customfmt.symbols.ast_indexer import IndexFile
-from customfmt.symbols.model import FileError, FileIndex, IndexResult
+from customfmt.symbols.model import FileError, IndexResult
 
 
 def IndexPaths(paths: list[str]) -> tuple[IndexResult, list[str]]:

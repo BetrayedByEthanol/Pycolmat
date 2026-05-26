@@ -14,7 +14,6 @@ IndexResult.ToDict() produces the full index, including file-level errors.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from pathlib import Path
 
 # ---------------------------------------------------------------------------
 # Kind constants

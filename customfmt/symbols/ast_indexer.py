@@ -35,8 +35,6 @@ from pathlib import Path
 
 from customfmt.io import ReadUtf8Text
 from customfmt.symbols.model import (
-   FileError,
-   FileIndex,
    KIND_ATTR_CALL,
    KIND_CALL,
    KIND_CLASS,
@@ -49,9 +47,10 @@ from customfmt.symbols.model import (
    KIND_MODULE_DECL,
    KIND_NAME_READ,
    KIND_PARAMETER,
+   FileError,
+   FileIndex,
    SymbolEntry,
 )
-
 
 # ---------------------------------------------------------------------------
 # Internal walker
@@ -285,7 +284,7 @@ class _Indexer(ast.NodeVisitor):
          case ast.Name(id=name, lineno=ln, col_offset=co):
             call_extra = {"args": len(node.args), "kwargs": len(node.keywords)}
             self._Add(KIND_CALL, name, ln, co, call_extra)
-         case ast.Attribute(attr=attr, lineno=ln, col_offset=co) as attr_node:
+         case ast.Attribute(attr=attr, lineno=ln, col_offset=co):
             # Build "obj.method" representation from the call target
             full = ast.unparse(node.func)
             attr_extra = {

@@ -27,15 +27,14 @@ import argparse
 import json
 import sys
 import textwrap
-
 from pathlib import Path
 
 from customfmt import __version__
-from customfmt.io import WriteUtf8Lf
 from customfmt.checker import CheckFile
 from customfmt.discovery import CollectFiles
 from customfmt.formatter import ProcessFile
 from customfmt.indexer import IndexPaths
+from customfmt.io import WriteUtf8Lf
 from customfmt.renamer import AnalyseFile
 from customfmt.types import Violation
 
@@ -306,7 +305,7 @@ def _CmdRename(args: argparse.Namespace) -> int:
 
 def _CmdIndex(args: argparse.Namespace) -> int:
    import json as _json
-   from customfmt.symbols.model import IndexResult
+
 
    result, disc_errors = IndexPaths(args.paths)
 
