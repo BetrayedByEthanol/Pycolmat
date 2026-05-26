@@ -15,6 +15,7 @@ dependencies = []   # stdlib only
 customfmt       = "customfmt.cli:_EntryMain"
 try-auto-format = "customfmt.cli:_EntryFix"
 check-format    = "customfmt.cli:_EntryCheck"
+create-index    = "customfmt.cli:_EntryIndex"
 
 [tool.setuptools.packages.find]
 include = ["customfmt*"]

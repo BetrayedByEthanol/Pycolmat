@@ -10,8 +10,8 @@ CF004  parameter names must be snake_case
          parameter of a method defined directly inside a class body.
 CF005  local variable names must be snake_case
 CF006  instance attributes assigned as self.X must be PascalCase
-CF007  global constants must be UPPER_CASE
-CF008  class constants must be UPPER_CASE
+CF007  module-level declarations must be PascalCase or UPPER_CASE
+CF008  class-body declarations must be PascalCase or UPPER_CASE
 
 Naming conventions
 ------------------
@@ -83,22 +83,44 @@ def _IsDunder(name: str) -> bool:
    return bool(_DUNDER_RE.match(name))
 
 
-# ---------------------------------------------------------------------------
-# Literal detection
-# ---------------------------------------------------------------------------
+def _IsNodeVisitorMethod(name: str) -> bool:
+   """
+   Return True if *name* is a required ast.NodeVisitor dispatch name.
+   NodeVisitor requires methods named exactly visit_<NodeType> and
+   generic_visit; these cannot be renamed to PascalCase.
+   """
+   return name == "generic_visit" or name.startswith("visit_")
 
 
-def _IsLiteral(node: ast.expr) -> bool:
-   """Return True if *node* is a compile-time literal constant."""
-   match node:
-      case ast.Constant():
+def _IsValidDeclName(name: str) -> bool:
+   """
+   Return True if *name* is acceptable for a module-level or class-body
+   declaration: PascalCase or UPPER_CASE, optionally with leading underscores.
+
+   Leading underscores are stripped before the pattern check so that
+   private names like _SNAKE_RE and _MyHelper are handled correctly.
+   """
+   stripped = name.lstrip("_")
+   if not stripped:
+      return True  # pure underscore names (rare) are left for other rules
+   return _IsPascal(stripped) or _IsUpper(stripped)
+
+
+def _IsDataclass(node: ast.ClassDef) -> bool:
+   """Return True if *node* has a @dataclass decorator."""
+   for dec in node.decorator_list:
+      if isinstance(dec, ast.Name) and dec.id == "dataclass":
          return True
-      case ast.Tuple(elts=elts) | ast.List(elts=elts) | ast.Set(elts=elts):
-         return all(_IsLiteral(e) for e in elts)
-      case ast.Dict(keys=keys, values=values):
-         return all((k is None or _IsLiteral(k)) and _IsLiteral(v) for k, v in zip(keys, values))
-      case _:
-         return False
+      if isinstance(dec, ast.Attribute) and dec.attr == "dataclass":
+         return True
+      # @dataclass(frozen=True) etc.
+      if isinstance(dec, ast.Call):
+         func = dec.func
+         if isinstance(func, ast.Name) and func.id == "dataclass":
+            return True
+         if isinstance(func, ast.Attribute) and func.attr == "dataclass":
+            return True
+   return False
 
 
 # ---------------------------------------------------------------------------
@@ -144,10 +166,7 @@ def Check(lines: list[str], path: Path) -> list[Violation]:
    if not _IsSnakeFilename(path.name) and not _IsDunder(path.stem):
       violations.append(
          Violation(
-            path,
-            1,
-            1,
-            "CF001",
+            path, 1, 1, "CF001",
             f"file name must be snake_case.py: {path.name!r}",
          )
       )
@@ -177,9 +196,11 @@ def Check(lines: list[str], path: Path) -> list[Violation]:
                )
             )
 
-   # CF003 — function/method names (dunders are exempt)
+   # CF003 — function/method names (dunders and NodeVisitor methods are exempt)
    for node in _FunctionNodes(tree):
       if _IsDunder(node.name):
+         continue
+      if _IsNodeVisitorMethod(node.name):
          continue
       if not _IsPascal(node.name):
          violations.append(
@@ -216,7 +237,9 @@ def Check(lines: list[str], path: Path) -> list[Violation]:
          name = arg.arg
          # Determine whether this is the exempt self/cls slot.
          is_exempt_self_cls = (
-            is_class_method and name in ("self", "cls") and name == first_positional_name
+            is_class_method
+            and name in ("self", "cls")
+            and name == first_positional_name
          )
          if is_exempt_self_cls:
             continue
@@ -289,46 +312,67 @@ def Check(lines: list[str], path: Path) -> list[Violation]:
                      )
                   )
 
-   # CF007 — global constants (module-level)
-   # Exempt dunder names (__version__, __all__, __author__, etc.) — these
-   # are Python ecosystem conventions that cannot be renamed.
+   # CF007 — module-level declarations must be PascalCase or UPPER_CASE.
+   # Covers both ast.Assign and ast.AnnAssign directly in Module.body.
+   # Dunder names (__version__, __all__, etc.) are exempt.
+   # RHS value is not inspected — the rule applies regardless of what is assigned.
    for node in tree.body:
-      if isinstance(node, ast.Assign) and _IsLiteral(node.value):
-         for target in node.targets:
-            if isinstance(target, ast.Name):
-               if _IsDunder(target.id):
-                  continue
-               if not _IsUpper(target.id):
-                  violations.append(
-                     Violation(
-                        path,
-                        target.lineno,
-                        target.col_offset + 1,
-                        "CF007",
-                        f"global constant must be UPPER_CASE: {target.id!r}",
-                     )
-                  )
+      targets: list[ast.Name] = []
+      if isinstance(node, ast.Assign):
+         for tgt in node.targets:
+            if isinstance(tgt, ast.Name):
+               targets.append(tgt)
+      elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+         targets.append(node.target)
+      for target in targets:
+         if _IsDunder(target.id):
+            continue
+         if not _IsValidDeclName(target.id):
+            violations.append(
+               Violation(
+                  path,
+                  target.lineno,
+                  target.col_offset + 1,
+                  "CF007",
+                  f"module-level declaration must be PascalCase or UPPER_CASE: "
+                  f"{target.id!r}",
+               )
+            )
 
-   # CF008 — class constants (class-body level)
+   # CF008 — class-body declarations must be PascalCase or UPPER_CASE.
+   # Covers direct ast.Assign and ast.AnnAssign in ClassDef.body.
+   # Assignments inside methods are NOT checked here (handled by CF005/CF006).
+   # Dunder names (__slots__, __annotations__, etc.) are exempt.
+   # RHS value is not inspected.
    for node in ast.walk(tree):
       if not isinstance(node, ast.ClassDef):
          continue
+      # Dataclass field definitions follow Python conventions (snake_case);
+      # skip CF008 for the entire class body when @dataclass is present.
+      if _IsDataclass(node):
+         continue
       for stmt in node.body:
-         if isinstance(stmt, ast.Assign) and _IsLiteral(stmt.value):
-            for target in stmt.targets:
-               if isinstance(target, ast.Name):
-                  if _IsDunder(target.id):
-                     continue
-                  if not _IsUpper(target.id):
-                     violations.append(
-                        Violation(
-                           path,
-                           target.lineno,
-                           target.col_offset + 1,
-                           "CF008",
-                           f"class constant must be UPPER_CASE: {target.id!r}",
-                        )
-                     )
+         class_targets: list[ast.Name] = []
+         if isinstance(stmt, ast.Assign):
+            for tgt in stmt.targets:
+               if isinstance(tgt, ast.Name):
+                  class_targets.append(tgt)
+         elif isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name):
+            class_targets.append(stmt.target)
+         for target in class_targets:
+            if _IsDunder(target.id):
+               continue
+            if not _IsValidDeclName(target.id):
+               violations.append(
+                  Violation(
+                     path,
+                     target.lineno,
+                     target.col_offset + 1,
+                     "CF008",
+                     f"class-body declaration must be PascalCase or UPPER_CASE: "
+                     f"{target.id!r}",
+                  )
+               )
 
    return sorted(violations)
 

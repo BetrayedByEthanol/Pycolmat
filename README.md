@@ -4,7 +4,7 @@ A small, project-specific Python formatting and style-checking tool.
 Works **alongside** Ruff and Pyright — it does not replace them.
 
 - `customfmt fix` – applies safe auto-formatting in place  
-- `customfmt check` – checks project-specific naming and style rules (CF001–CF010)
+- `customfmt check` – checks project-specific naming and style rules (CF001–CF012)
 
 ---
 
@@ -53,9 +53,10 @@ customfmt fix --quiet src/
 
 Auto-fix rules applied (in order):
 
-1. Remove trailing whitespace  
-2. Align contiguous `self.X = value` blocks  
-3. Ensure exactly one final newline  
+1. Convert CRLF / CR line endings to LF  
+2. Remove trailing whitespace  
+3. Align contiguous `self.X = value` blocks  
+4. Ensure exactly one final newline  
 
 ### `customfmt check` — check style rules
 
@@ -85,6 +86,40 @@ src/user_model.py:7:1 CF010 indentation of 4 spaces is not a multiple of 3
 
 ---
 
+### `customfmt rename` — safe local variable rename
+
+```bash
+# Report rename candidates (exits 1 if any found)
+customfmt rename --check src/
+
+# Show unified diff of proposed renames without writing
+customfmt rename --diff src/
+
+# Apply renames in place (exits 0)
+customfmt rename --apply src/
+```
+
+Renames non-`snake_case` local variables (CF005) to `snake_case` within
+each function scope. Output format:
+
+```
+src/user_model.py:4:7 RENAME local variable 'TotalCount' -> 'total_count'
+```
+
+**Safety rules** — a function is skipped entirely if it:
+
+- contains a `global` or `nonlocal` declaration,
+- calls `locals()`, `globals()`, `vars()`, `eval()`, or `exec()`,
+- would produce a name collision with an existing local, parameter,
+  imported name, or Python builtin, or
+- has two bad names that map to the same `snake_case` target.
+
+Nested functions and classes are not renamed in v1; each top-level
+function scope is handled independently.
+
+
+---
+
 ## Rules
 
 ### Auto-fix rules (applied by `customfmt fix`)
@@ -106,8 +141,8 @@ src/user_model.py:7:1 CF010 indentation of 4 spaces is not a multiple of 3
 | CF004 | Parameter names must be `snake_case` (except `self`/`cls`)       |
 | CF005 | Local variable names must be `snake_case`                         |
 | CF006 | Instance attributes (`self.X`) must be `PascalCase`               |
-| CF007 | Global-scope literal constants must be `UPPER_CASE`               |
-| CF008 | Class-body literal constants must be `UPPER_CASE`                 |
+| CF007 | Module-level declarations must be `PascalCase` or `UPPER_CASE`     |
+| CF008 | Class-body declarations must be `PascalCase` or `UPPER_CASE`      |
 | CF009 | `self.X = value` assignment blocks must be aligned                |
 | CF010 | Indentation must use spaces; width must be a multiple of 3        |
 | CF011 | File must use LF line endings only (no CRLF or bare CR)           |
@@ -121,22 +156,38 @@ src/user_model.py:7:1 CF010 indentation of 4 spaces is not a multiple of 3
 | `PascalCase`| starts uppercase, no underscores             | `UserModel`        |
 | `UPPER_CASE`| uppercase words separated by underscores     | `DEFAULT_TIMEOUT`  |
 
-### Constant detection
+### CF007 / CF008 declaration naming
 
-An assignment is treated as a constant (for CF007/CF008) only when the
-right-hand side is a **literal** value at module or class scope:
+Every direct `Assign` or `AnnAssign` at module level (CF007) or in a class
+body (CF008) must use either `PascalCase` or `UPPER_CASE`.  The rule applies
+regardless of what is on the right-hand side — Python has no true
+const/var distinction, so literal vs non-literal RHS is not relevant.
 
 ```python
-# Constants — must be UPPER_CASE
+# Module level — all valid (CF007)
+AppConfig      = LoadConfig()
 DEFAULT_TIMEOUT = 30
-OPTIONS = ["a", "b"]
-MATRIX = ((1, 2), (3, 4))
-ENABLED = True
+TableName      = "orders"
 
-# Not constants — function calls / object construction
-UserName = get_user_name()   # not flagged by CF007
-Connection = Database()      # not flagged by CF007
+# Module level — all invalid (CF007)
+appConfig      = LoadConfig()   # camelCase
+default_timeout = 30            # snake_case
+tablename      = "orders"       # lowercase
+
+# Class body — all valid (CF008)
+class Repo:
+    TableName  = "ArtikelVertrieb"
+    TABLE_NAME = "ArtikelVertrieb"
+    TypeRef    = {}
+
+# Class body — all invalid (CF008)
+class Repo:
+    tableName = "ArtikelVertrieb"   # camelCase
+    type_ref  = {}                  # snake_case
+    pk        = "ID"                # lowercase
 ```
+
+Dunder names (`__version__`, `__all__`, `__slots__`, etc.) are exempt.
 
 ---
 
@@ -295,17 +346,22 @@ tools/customfmt/
 │   ├── formatter.py     # orchestrates auto-fix rules
 │   ├── checker.py       # orchestrates check-only rules
 │   ├── discovery.py     # file collection with ignored-dir filtering
+│   ├── io.py            # UTF-8 / LF read-write helpers
+│   ├── renamer.py       # safe local-variable rename (CF005)
 │   ├── types.py         # Violation dataclass
 │   └── rules/
 │       ├── trailing_whitespace.py
 │       ├── final_newline.py
-│       ├── self_assignment_alignment.py  # fix + CF009
+│       ├── line_endings.py              # fix + CF011 / CF012
+│       ├── self_assignment_alignment.py # fix + CF009
 │       ├── indentation.py               # CF010
 │       └── naming.py                    # CF001–CF008 (AST-based)
 └── tests/
     ├── test_cli.py
     ├── test_discovery.py
     ├── test_final_newline.py
+    ├── test_line_endings.py
+    ├── test_rename.py
     ├── test_trailing_whitespace.py
     ├── test_self_assignment_alignment.py
     ├── test_indentation.py

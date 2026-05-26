@@ -224,7 +224,9 @@ class TestCF005:
       assert CodesAt(Check(src, P("f.py")), "CF005")
 
    def TestExceptAsTarget(self):
-      src = L("def Foo():\n   try:\n      pass\n   except Exception as BadErr:\n      pass\n")
+      src = L(
+         "def Foo():\n   try:\n      pass\n   except Exception as BadErr:\n      pass\n"
+      )
       assert CodesAt(Check(src, P("f.py")), "CF005")
 
    def TestUnderscoreSkip(self):
@@ -266,66 +268,142 @@ class TestCF006:
 
 
 # ---------------------------------------------------------------------------
-# CF007 – global constants UPPER_CASE
+# CF007 – module-level declarations must be PascalCase or UPPER_CASE
 # ---------------------------------------------------------------------------
 
 
 class TestCF007:
-   def TestValidUpper(self):
-      src = L("DEFAULT_TIMEOUT = 30\n")
-      assert not CodesAt(Check(src, P("f.py")), "CF007")
+   def TestPascalCaseModuleDeclPasses(self):
+      """PascalCase module-level declaration is valid."""
+      assert not CodesAt(Check(L("AppConfig = LoadConfig()\n"), P("f.py")), "CF007")
 
-   def TestInvalidLower(self):
-      src = L("default_timeout = 30\n")
-      assert CodesAt(Check(src, P("f.py")), "CF007")
+   def TestUpperCaseModuleDeclPasses(self):
+      """UPPER_CASE module-level declaration is valid."""
+      assert not CodesAt(Check(L("DEFAULT_TIMEOUT = 30\n"), P("f.py")), "CF007")
 
-   def TestFunctionCallNotConstant(self):
-      src = L("UserName = get_user()\n")
-      assert not CodesAt(Check(src, P("f.py")), "CF007")
+   def TestUpperCaseLiteralPasses(self):
+      """UPPER_CASE with literal RHS is still valid."""
+      assert not CodesAt(Check(L("MAX_RETRIES = 3\n"), P("f.py")), "CF007")
 
-   def TestObjectConstructionNotConstant(self):
-      src = L("Connection = Database()\n")
-      assert not CodesAt(Check(src, P("f.py")), "CF007")
+   def TestPascalCaseNonLiteralPasses(self):
+      """PascalCase with non-literal RHS (function call) is valid."""
+      assert not CodesAt(Check(L("UserName = GetUser()\n"), P("f.py")), "CF007")
 
-   def TestListLiteralConstant(self):
-      src = L('OPTIONS = ["a", "b"]\n')
-      assert not CodesAt(Check(src, P("f.py")), "CF007")
+   def TestSnakeCaseFails(self):
+      """snake_case module-level declaration is a CF007 violation."""
+      assert CodesAt(Check(L("default_timeout = 30\n"), P("f.py")), "CF007")
 
-   def TestListLiteralBadName(self):
-      src = L('options = ["a", "b"]\n')
-      assert CodesAt(Check(src, P("f.py")), "CF007")
+   def TestCamelCaseFails(self):
+      """camelCase module-level declaration is a CF007 violation."""
+      assert CodesAt(Check(L("appConfig = LoadConfig()\n"), P("f.py")), "CF007")
 
-   def TestNestedLiteral(self):
-      src = L("MATRIX = ((1, 2), (3, 4))\n")
-      assert not CodesAt(Check(src, P("f.py")), "CF007")
+   def TestLowercaseFails(self):
+      """Lowercase module-level declaration is a CF007 violation."""
+      assert CodesAt(Check(L("model = MyModel()\n"), P("f.py")), "CF007")
 
-   def TestNoneLiteral(self):
-      src = L("DEFAULT_VALUE = None\n")
-      assert not CodesAt(Check(src, P("f.py")), "CF007")
+   def TestLiteralRhsDoesNotForceUpperCase(self):
+      """A literal RHS must NOT force UPPER_CASE; PascalCase is equally valid."""
+      # Old behaviour: only literals triggered CF007 and only UPPER_CASE passed.
+      # New behaviour: all decls must be PascalCase or UPPER_CASE regardless of RHS.
+      assert not CodesAt(Check(L("TableName = \"x\"\n"), P("f.py")), "CF007")
 
-   def TestBoolLiteral(self):
-      src = L("ENABLED = True\n")
+   def TestNonLiteralRhsStillChecked(self):
+      """Non-literal RHS is still checked — it is not exempt."""
+      assert CodesAt(Check(L("table_name = GetTable()\n"), P("f.py")), "CF007")
+
+   def TestDunderExempt(self):
+      """Dunder names like __version__ are exempt from CF007."""
+      assert not CodesAt(Check(L("__version__ = \"1.0\"\n"), P("f.py")), "CF007")
+
+   def TestAnnAssignModuleLevelChecked(self):
+      """AnnAssign at module level is also subject to CF007."""
+      assert CodesAt(Check(L("my_count: int = 0\n"), P("f.py")), "CF007")
+
+   def TestAnnAssignModuleLevelPascalPasses(self):
+      assert not CodesAt(Check(L("MyCount: int = 0\n"), P("f.py")), "CF007")
+
+   def TestInsideFunctionNotFlagged(self):
+      """Assignments inside functions are local variables, not module decls."""
+      src = L("def Foo():\n   snake_var = 1\n")
       assert not CodesAt(Check(src, P("f.py")), "CF007")
 
 
 # ---------------------------------------------------------------------------
-# CF008 – class constants UPPER_CASE
+# CF008 – class-body declarations must be PascalCase or UPPER_CASE
 # ---------------------------------------------------------------------------
 
 
 class TestCF008:
-   def TestValid(self):
-      src = L("class A:\n   MAX_RETRIES = 3\n")
+   def TestPascalCaseClassDeclPasses(self):
+      """PascalCase class-body declaration is valid."""
+      src = L("class A:\n   TableName = \"ArtikelVertrieb\"\n")
       assert not CodesAt(Check(src, P("f.py")), "CF008")
 
-   def TestInvalid(self):
-      src = L("class A:\n   max_retries = 3\n")
+   def TestUpperCaseClassDeclPasses(self):
+      """UPPER_CASE class-body declaration is valid."""
+      src = L("class A:\n   TABLE_NAME = \"ArtikelVertrieb\"\n")
+      assert not CodesAt(Check(src, P("f.py")), "CF008")
+
+   def TestSnakeCaseFails(self):
+      src = L("class A:\n   table_name = \"x\"\n")
+      assert CodesAt(Check(src, P("f.py")), "CF008")
+
+   def TestCamelCaseFails(self):
+      src = L("class A:\n   tableName = \"x\"\n")
+      assert CodesAt(Check(src, P("f.py")), "CF008")
+
+   def TestLowercaseFails(self):
+      src = L("class A:\n   pk = \"ID\"\n")
+      assert CodesAt(Check(src, P("f.py")), "CF008")
+
+   def TestLiteralRhsDoesNotForceUpperCase(self):
+      """Literal RHS must NOT force UPPER_CASE; PascalCase is equally valid."""
+      src = L("class A:\n   TypeRef = {}\n")
+      assert not CodesAt(Check(src, P("f.py")), "CF008")
+
+   def TestNonLiteralRhsStillChecked(self):
+      """Non-literal RHS is not exempt from CF008."""
+      src = L("class A:\n   type_ref = SomeClass()\n")
       assert CodesAt(Check(src, P("f.py")), "CF008")
 
    def TestMethodBodyNotFlagged(self):
+      """Assignments inside methods are local variables, not class decls."""
       src = L("class A:\n   def Foo(self):\n      local_var = 1\n")
       assert not CodesAt(Check(src, P("f.py")), "CF008")
 
-   def TestNonLiteralNotConstant(self):
-      src = L("class A:\n   Connection = Database()\n")
+   def TestDunderExempt(self):
+      """Dunder names like __slots__ are exempt from CF008."""
+      src = L("class A:\n   __slots__ = (\"Name\",)\n")
       assert not CodesAt(Check(src, P("f.py")), "CF008")
+
+   def TestAnnAssignClassBodyChecked(self):
+      """AnnAssign in class body is subject to CF008."""
+      src = L("class A:\n   my_count: int = 0\n")
+      assert CodesAt(Check(src, P("f.py")), "CF008")
+
+   def TestAnnAssignClassBodyPascalPasses(self):
+      src = L("class A:\n   MyCount: int = 0\n")
+      assert not CodesAt(Check(src, P("f.py")), "CF008")
+
+   def TestFullRepoClassExample(self):
+      """The canonical Repo class from the spec — all PascalCase, all valid."""
+      src = L("""class Repo:
+   TableName  = "ArtikelVertrieb"
+   References = {}
+   TypeRef    = {}
+   Model      = ArtikelVertriebModel
+   Pk         = "ID"
+""")
+      assert not CodesAt(Check(src, P("f.py")), "CF008")
+
+   def TestFullRepoBadClassExample(self):
+      """The bad Repo class from the spec — all snake_case, all CF008."""
+      src = L("""class Repo:
+   tableName  = "ArtikelVertrieb"
+   references = {}
+   typeRef    = {}
+   model      = ArtikelVertriebModel
+   pk         = "ID"
+""")
+      viols = CodesAt(Check(src, P("f.py")), "CF008")
+      assert len(viols) == 5
