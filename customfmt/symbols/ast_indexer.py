@@ -35,6 +35,8 @@ from pathlib import Path
 
 from customfmt.io import ReadUtf8Text
 from customfmt.symbols.model import (
+   FileError,
+   FileIndex,
    KIND_ATTR_CALL,
    KIND_CALL,
    KIND_CLASS,
@@ -47,10 +49,9 @@ from customfmt.symbols.model import (
    KIND_MODULE_DECL,
    KIND_NAME_READ,
    KIND_PARAMETER,
-   FileError,
-   FileIndex,
    SymbolEntry,
 )
+
 
 # ---------------------------------------------------------------------------
 # Internal walker
@@ -66,11 +67,14 @@ class _Indexer(ast.NodeVisitor):
 
    def __init__(self, file_path: str) -> None:
       self._File   = file_path
-      self._scope  : list[str] = []
-      self.Symbols : list[SymbolEntry] = []
+      self._scope      : list[str] = []
+      self.Symbols     : list[SymbolEntry] = []
       # Track whether the current scope element is a class or function
       # so we know whether a nested def is a method or a function.
-      self._scope_kind: list[str] = []  # "class" | "function"
+      self._scope_kind : list[str] = []  # "class" | "function"
+      # Track (line, col) positions already emitted as call/attribute_call
+      # so the same Name node is not also emitted as name_read.
+      self._call_sites : set[tuple[int, int]] = set()
 
    # -----------------------------------------------------------------------
    # Helpers
@@ -264,8 +268,12 @@ class _Indexer(ast.NodeVisitor):
          self._IndexCall(node)
 
       # Name reads ----------------------------------------------------------
+      # Skip positions already recorded as call/attribute_call to avoid
+      # emitting a duplicate name_read for the function-name Name node.
       elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
-         self._Add(KIND_NAME_READ, node.id, node.lineno, node.col_offset)
+         pos = (node.lineno, node.col_offset)
+         if pos not in self._call_sites:
+            self._Add(KIND_NAME_READ, node.id, node.lineno, node.col_offset)
 
    def _IndexWriteTarget(self, target: ast.expr) -> None:
       match target:
@@ -284,7 +292,8 @@ class _Indexer(ast.NodeVisitor):
          case ast.Name(id=name, lineno=ln, col_offset=co):
             call_extra = {"args": len(node.args), "kwargs": len(node.keywords)}
             self._Add(KIND_CALL, name, ln, co, call_extra)
-         case ast.Attribute(attr=attr, lineno=ln, col_offset=co):
+            self._call_sites.add((ln, co))
+         case ast.Attribute(attr=attr, lineno=ln, col_offset=co) as attr_node:
             # Build "obj.method" representation from the call target
             full = ast.unparse(node.func)
             attr_extra = {
@@ -293,6 +302,7 @@ class _Indexer(ast.NodeVisitor):
                "kwargs": len(node.keywords),
             }
             self._Add(KIND_ATTR_CALL, attr, ln, co, attr_extra)
+            self._call_sites.add((ln, co))
          case _:
             pass
 

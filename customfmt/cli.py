@@ -6,7 +6,7 @@ Commands
   customfmt fix [--check] [--diff] [--quiet] <paths...>
   customfmt check [--quiet] [--json] <paths...>
   customfmt rename [--check | --diff | --apply] <paths...>
-  customfmt index  [--json] [--pretty] [--output PATH] <paths...>
+  customfmt index  [--pretty] [--output PATH] <paths...>
 
 Aliases (console_scripts)
 --------------------------
@@ -112,8 +112,8 @@ def _BuildParser(prog: str = "customfmt") -> argparse.ArgumentParser:
    # -- check ----------------------------------------------------------------
    chk_p = sub.add_parser(
       "check",
-      help="Check all custom rules (CF001–CF012).",
-      description="Check files against all custom rules (CF001–CF012). Does not modify files.",
+      help="Check all custom rules (CF001–CF019).",
+      description="Check files against all custom rules (CF001–CF019). Does not modify files.",
    )
    chk_p.add_argument("paths", nargs="+", metavar="PATH", help="Files or directories to process.")
    chk_p.add_argument("--quiet", "-q", action="store_true", help="Suppress per-violation output.")
@@ -168,13 +168,7 @@ def _BuildParser(prog: str = "customfmt") -> argparse.ArgumentParser:
    idx_p.add_argument(
       "paths", nargs="+", metavar="PATH", help="Files or directories to index."
    )
-   idx_p.add_argument(
-      "--json",
-      action="store_true",
-      dest="json_out",
-      default=True,
-      help="Output as JSON (default).",
-   )
+   # Output is always JSON; no --json flag needed.
    idx_p.add_argument(
       "--pretty",
       action="store_true",
@@ -340,7 +334,7 @@ def _CmdRename(args: argparse.Namespace) -> int:
 
 def _CmdIndex(args: argparse.Namespace) -> int:
    import json as _json
-
+   from customfmt.symbols.model import IndexResult
 
    result, disc_errors = IndexPaths(args.paths)
 

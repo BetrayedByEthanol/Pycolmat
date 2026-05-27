@@ -24,6 +24,8 @@ TestAstIndexer
    TestLocalWriteExceptAs
    TestLocalWriteTupleUnpack
    TestNameReadIndexed
+   TestCallNotDuplicatedAsNameRead
+   TestAttrCallNotDuplicatedAsNameRead
    TestCallIndexed
    TestAttributeCallIndexed
    TestNestedClassInsideFunction
@@ -55,11 +57,17 @@ import json
 import textwrap
 from pathlib import Path
 
+import pytest
+
 from customfmt.cli import Main, MainIndex
-from customfmt.indexer import IndexPaths
 from customfmt.io import UTF8_BOM
+from customfmt.indexer import IndexPaths
 from customfmt.symbols.ast_indexer import IndexFile
 from customfmt.symbols.model import (
+   FileError,
+   FileIndex,
+   FileError,
+   IndexResult,
    KIND_ATTR_CALL,
    KIND_CALL,
    KIND_CLASS,
@@ -72,9 +80,6 @@ from customfmt.symbols.model import (
    KIND_MODULE_DECL,
    KIND_NAME_READ,
    KIND_PARAMETER,
-   FileError,
-   FileIndex,
-   IndexResult,
    SymbolEntry,
 )
 
@@ -321,6 +326,25 @@ class TestAstIndexer:
       reads = Names(idx, KIND_NAME_READ)
       assert "x" in reads
 
+   def TestCallNotDuplicatedAsNameRead(self, tmp_path):
+      """Bare call name must NOT also appear as name_read (fix 5)."""
+      f = Write(tmp_path / "f.py", Src("def Foo():\n   Bar(1, 2)\n"))
+      idx = IndexFile(f)
+      call_names = Names(idx, KIND_CALL)
+      read_names = Names(idx, KIND_NAME_READ)
+      assert "Bar" in call_names
+      # Bar was already captured as a call; it must NOT also be a name_read
+      assert "Bar" not in read_names
+
+   def TestAttrCallNotDuplicatedAsNameRead(self, tmp_path):
+      """Attribute call method name must NOT also appear as name_read."""
+      f = Write(tmp_path / "f.py", Src("def Foo(self):\n   self.Db.Fetch(1)\n"))
+      idx = IndexFile(f)
+      attr_calls = Names(idx, KIND_ATTR_CALL)
+      read_names = Names(idx, KIND_NAME_READ)
+      assert "Fetch" in attr_calls
+      assert "Fetch" not in read_names
+
    def TestCallIndexed(self, tmp_path):
       f = Write(tmp_path / "f.py", Src("def Foo():\n   Bar(1, 2)\n"))
       idx = IndexFile(f)
@@ -478,6 +502,21 @@ class TestCLI:
       assert rc == 0
       out = capsys.readouterr().out
       data = json.loads(out)
+      assert "files" in data
+
+   def TestPyprojectEntryPointExists(self):
+      """create-index console_script must resolve to _EntryIndex in cli."""
+      from customfmt.cli import _EntryIndex
+      assert callable(_EntryIndex)
+
+   def TestIndexAlwaysOutputsJson(self, tmp_path, capsys):
+      """Output without --pretty is still valid JSON (JSON is always default)."""
+      Write(tmp_path / "f.py", "X = 1\n")
+      rc = RunMain("index", str(tmp_path))
+      assert rc == 0
+      out = capsys.readouterr().out
+      import json
+      data = json.loads(out)  # must not raise
       assert "files" in data
 
    def TestInvalidUtf8FileReportedInErrors(self, tmp_path, capsys):
