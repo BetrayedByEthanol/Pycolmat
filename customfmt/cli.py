@@ -334,7 +334,7 @@ def _CmdRename(args: argparse.Namespace) -> int:
 
 def _CmdIndex(args: argparse.Namespace) -> int:
    import json as _json
-   from customfmt.symbols.model import IndexResult
+
 
    result, disc_errors = IndexPaths(args.paths)
 

@@ -57,17 +57,11 @@ import json
 import textwrap
 from pathlib import Path
 
-import pytest
-
 from customfmt.cli import Main, MainIndex
-from customfmt.io import UTF8_BOM
 from customfmt.indexer import IndexPaths
+from customfmt.io import UTF8_BOM
 from customfmt.symbols.ast_indexer import IndexFile
 from customfmt.symbols.model import (
-   FileError,
-   FileIndex,
-   FileError,
-   IndexResult,
    KIND_ATTR_CALL,
    KIND_CALL,
    KIND_CLASS,
@@ -80,6 +74,9 @@ from customfmt.symbols.model import (
    KIND_MODULE_DECL,
    KIND_NAME_READ,
    KIND_PARAMETER,
+   FileError,
+   FileIndex,
+   IndexResult,
    SymbolEntry,
 )
 

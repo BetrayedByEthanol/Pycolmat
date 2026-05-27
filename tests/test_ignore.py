@@ -42,13 +42,11 @@ TestCF018CF019Codes
 from __future__ import annotations
 
 import json
-import textwrap
 from pathlib import Path
 
 from customfmt.cli import Main, ParseIgnoreCodes
-from customfmt.io import UTF8_BOM
-from customfmt.rules.trailing_whitespace import RULE_CODE as CF018
 from customfmt.rules.final_newline import RULE_CODE as CF019
+from customfmt.rules.trailing_whitespace import RULE_CODE as CF018
 
 P = Path("my_module.py")
 
