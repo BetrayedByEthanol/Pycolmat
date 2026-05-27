@@ -10,7 +10,7 @@ from pathlib import Path
 
 from customfmt.types import Violation
 
-RULE_CODE = "trailing-whitespace"  # internal; not a CF0xx check-only rule
+RULE_CODE = "CF018"
 
 
 def Check(lines: list[str], path: Path) -> list[Violation]:
@@ -25,5 +25,18 @@ def Check(lines: list[str], path: Path) -> list[Violation]:
 
 
 def Fix(lines: list[str]) -> list[str]:
-   """Remove trailing whitespace from each line, preserving the newline."""
-   return [line.rstrip("\n").rstrip() + "\n" for line in lines]
+   """Remove trailing spaces/tabs from each line, preserving the newline.
+
+   Only spaces and tabs are stripped; \\r is intentionally left intact so
+   that CRLF lines are not corrupted when CF011 (line endings) is ignored.
+   """
+   result = []
+   for line in lines:
+      # Strip the line terminator(s) at the end, then strip only spaces/tabs.
+      if line.endswith("\r\n"):
+         result.append(line[:-2].rstrip(" \t") + "\r\n")
+      elif line.endswith("\n"):
+         result.append(line[:-1].rstrip(" \t") + "\n")
+      else:
+         result.append(line.rstrip(" \t"))
+   return result

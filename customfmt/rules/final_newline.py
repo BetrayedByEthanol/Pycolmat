@@ -10,7 +10,7 @@ from pathlib import Path
 
 from customfmt.types import Violation
 
-RULE_CODE = "final-newline"  # internal; not a CF0xx check-only rule
+RULE_CODE = "CF019"
 
 
 def Check(lines: list[str], path: Path) -> list[Violation]:

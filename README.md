@@ -126,10 +126,10 @@ function scope is handled independently.
 
 | Rule                   | Description                                                   |
 |------------------------|---------------------------------------------------------------|
-| trailing-whitespace    | Remove trailing spaces/tabs on every line                     |
+| CF018 (trailing-whitespace) | Remove trailing spaces/tabs on every line              |
 | self-alignment         | Align contiguous `self.X = value` blocks (same indent)        |
-| final-newline          | Ensure exactly one newline at end of file                     |
-| line-endings           | Convert CRLF and bare CR line endings to LF                   |
+| CF019 (final-newline)  | Ensure exactly one newline at end of file                     |
+| CF011 (line-endings)   | Convert CRLF and bare CR line endings to LF                   |
 
 ### Check-only rules (reported by `customfmt check`)
 
@@ -147,6 +147,11 @@ function scope is handled independently.
 | CF010 | Indentation must use spaces; width must be a multiple of 3        |
 | CF011 | File must use LF line endings only (no CRLF or bare CR)           |
 | CF012 | File must be valid UTF-8 without BOM                              |
+| CF013 | Class-body declaration block must be aligned                      |
+| CF014 | Top-level declarations must appear before class/function defs     |
+| CF015 | Class-body declarations must appear before methods/nested classes |
+| CF018 | Trailing whitespace on any line                                   |
+| CF019 | Missing newline at end of file                                    |
 
 ### Naming convention reference
 
@@ -238,6 +243,44 @@ try-auto-format --check src/
 check-format src/
 pyright
 ```
+
+### `--ignore` — suppress specific rules
+
+Any `customfmt fix` or `customfmt check` command accepts `--ignore` to
+suppress specific rule codes. This is useful in CI when introducing rules
+gradually or when a project legitimately deviates from a rule.
+
+```bash
+# Suppress a single rule
+check-format src/ --ignore CF014
+
+# Suppress multiple rules (comma-separated)
+check-format src/ --ignore "CF014,CF015"
+
+# Suppress multiple rules (semicolon-separated)
+check-format src/ --ignore "CF014;CF015"
+
+# Repeat the flag
+check-format src/ --ignore CF014 --ignore CF015
+
+# Skip class-body alignment in fix mode
+try-auto-format src/ --ignore CF013
+
+# Check but ignore hoisting violations
+try-auto-format --check src/ --ignore CF013
+
+# Case-insensitive
+check-format src/ --ignore cf014
+```
+
+`--ignore` is accepted by `customfmt fix`, `customfmt check`, `try-auto-format`,
+and `check-format`. It is **not** available on `customfmt rename` or
+`customfmt index`.
+
+In fix write mode, ignored fix rules are also skipped (the transformation is
+not applied), not just suppressed in output.
+
+---
 
 ### Gitea Actions example
 

@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 import textwrap
 from pathlib import Path
@@ -41,6 +42,29 @@ from customfmt.types import Violation
 # ---------------------------------------------------------------------------
 # Argument parser
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Ignore-code helpers
+# ---------------------------------------------------------------------------
+
+def ParseIgnoreCodes(values: list[str]) -> frozenset[str]:
+   """
+   Parse the list of raw --ignore values into a normalised frozenset of
+   uppercase rule codes.
+
+   Each value may be a single code ("CF014"), a comma-separated list
+   ("CF014,CF015"), a semicolon-separated list ("CF014;CF015"), or mixed.
+   Repeated --ignore flags produce multiple entries in the input list.
+   All codes are uppercased; surrounding whitespace is stripped.
+   """
+   codes: set[str] = set()
+   for raw in values:
+      for part in re.split(r"[,;]", raw):
+         code = part.strip().upper()
+         if code:
+            codes.add(code)
+   return frozenset(codes)
 
 
 def _BuildParser(prog: str = "customfmt") -> argparse.ArgumentParser:
@@ -80,6 +104,10 @@ def _BuildParser(prog: str = "customfmt") -> argparse.ArgumentParser:
       help="Show unified diff of proposed changes without writing files.",
    )
    fix_p.add_argument("--quiet", "-q", action="store_true", help="Suppress per-file output.")
+   fix_p.add_argument(
+      "--ignore", metavar="RULES", action="append", default=[],
+      help="Rule codes to ignore, comma/semicolon-separated (e.g. CF013,CF009). May be repeated.",
+   )
 
    # -- check ----------------------------------------------------------------
    chk_p = sub.add_parser(
@@ -94,6 +122,10 @@ def _BuildParser(prog: str = "customfmt") -> argparse.ArgumentParser:
       action="store_true",
       dest="json_out",
       help="Output violations as JSON.",
+   )
+   chk_p.add_argument(
+      "--ignore", metavar="RULES", action="append", default=[],
+      help="Rule codes to ignore, comma/semicolon-separated (e.g. CF014,CF015). May be repeated.",
    )
 
    # -- rename ---------------------------------------------------------------
@@ -177,6 +209,7 @@ def _CmdFix(args: argparse.Namespace) -> int:
    check_only: bool = args.check
    show_diff: bool = args.diff
    quiet: bool = args.quiet
+   ignore_codes = ParseIgnoreCodes(args.ignore)
    any_change = False
 
    for path in files:
@@ -188,6 +221,7 @@ def _CmdFix(args: argparse.Namespace) -> int:
             path,
             check_only=read_only,
             diff=show_diff,
+            ignore_codes=ignore_codes,
          )
       except (OSError, UnicodeDecodeError, ValueError) as exc:
          print(f"customfmt: error: {path}: {exc}", file=sys.stderr)
@@ -225,11 +259,12 @@ def _CmdCheck(args: argparse.Namespace) -> int:
 
    quiet: bool = args.quiet
    json_out: bool = args.json_out
+   ignore_codes = ParseIgnoreCodes(args.ignore)
    all_violations: list[Violation] = []
 
    for path in files:
       try:
-         viols = CheckFile(path)
+         viols = CheckFile(path, ignore_codes=ignore_codes)
       except (OSError, UnicodeDecodeError, ValueError) as exc:
          print(f"customfmt: error: {path}: {exc}", file=sys.stderr)
          return 2

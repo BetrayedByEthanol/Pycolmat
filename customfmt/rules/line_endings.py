@@ -45,9 +45,11 @@ def CheckBytes(raw: bytes, path: Path) -> list[Violation]:
 
    # CF012 – BOM
    if raw.startswith(UTF8_BOM):
-      violations.append(Violation(path, 1, 1, RULE_CF012, "file has a UTF-8 BOM; use plain UTF-8"))
+      violations.append(
+         Violation(path, 1, 1, RULE_CF012, "file has a UTF-8 BOM; use plain UTF-8")
+      )
       # Strip BOM before further UTF-8 validation so we don't double-report.
-      raw = raw[len(UTF8_BOM) :]
+      raw = raw[len(UTF8_BOM):]
 
    # CF012 – invalid UTF-8
    try:
@@ -55,10 +57,7 @@ def CheckBytes(raw: bytes, path: Path) -> list[Violation]:
    except UnicodeDecodeError as exc:
       violations.append(
          Violation(
-            path,
-            1,
-            1,
-            RULE_CF012,
+            path, 1, 1, RULE_CF012,
             f"file is not valid UTF-8: {exc}",
          )
       )
@@ -71,7 +70,9 @@ def CheckBytes(raw: bytes, path: Path) -> list[Violation]:
          detail = "CRLF (\\r\\n) line endings detected"
       else:
          detail = "bare CR (\\r) line endings detected"
-      violations.append(Violation(path, 1, 1, RULE_CF011, f"{detail}; use LF only"))
+      violations.append(
+         Violation(path, 1, 1, RULE_CF011, f"{detail}; use LF only")
+      )
 
    return violations
 

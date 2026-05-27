@@ -19,8 +19,13 @@ from customfmt.rules import (
 )
 from customfmt.types import Violation
 
+_EMPTY: frozenset[str] = frozenset()
 
-def CheckFile(path: Path) -> list[Violation]:
+
+def CheckFile(
+   path: Path,
+   ignore_codes: frozenset[str] = _EMPTY,
+) -> list[Violation]:
    """
    Run all check-only rules against *path* and return violations.
 
@@ -35,26 +40,30 @@ def CheckFile(path: Path) -> list[Violation]:
    CF014        top-level declaration hoisting (hoisting.py)
    CF015        class-body declaration hoisting (hoisting.py)
 
-   If CF012 is reported (invalid UTF-8), AST-based rules are skipped
-   because the source cannot be parsed.
+   Violations whose code appears in *ignore_codes* are omitted from the
+   returned list.  If CF012 (invalid UTF-8) is reported, AST-based rules
+   are skipped because the source cannot be parsed.
    """
    raw = ReadUtf8Bytes(path)
    encoding_viols = line_endings.CheckBytes(raw, path)
 
-   violations: list[Violation] = list(encoding_viols)
+   violations: list[Violation] = [
+      v for v in encoding_viols if v.code not in ignore_codes
+   ]
 
    # If the file has invalid UTF-8, we cannot decode or run AST rules.
    # A BOM-only CF012 violation is still decodable after stripping the BOM,
    # so we only bail out when the bytes themselves are not valid UTF-8.
    has_invalid_utf8 = any(
-      v.code == "CF012" and "not valid UTF-8" in v.message for v in encoding_viols
+      v.code == "CF012" and "not valid UTF-8" in v.message
+      for v in encoding_viols
    )
    if has_invalid_utf8:
       return sorted(violations)
 
    # Decode safely — remove exact BOM prefix if present (already reported above).
    if raw.startswith(UTF8_BOM):
-      text = raw[len(UTF8_BOM) :].decode("utf-8")
+      text = raw[len(UTF8_BOM):].decode("utf-8")
    else:
       text = raw.decode("utf-8")
 
@@ -69,19 +78,13 @@ def CheckFile(path: Path) -> list[Violation]:
 
    lines = text.splitlines(keepends=True)
 
-   # Naming (CF001–CF008)
-   violations.extend(naming.Check(lines, path))
+   def _Extend(viols: list[Violation]) -> None:
+      violations.extend(v for v in viols if v.code not in ignore_codes)
 
-   # CF009 alignment
-   violations.extend(self_assignment_alignment.Check(lines, path))
-
-   # CF013 class-body alignment
-   violations.extend(class_body_alignment.Check(lines, path))
-
-   # CF014 / CF015 declaration hoisting
-   violations.extend(hoisting.Check(lines, path))
-
-   # CF010 indentation
-   violations.extend(indentation.Check(lines, path))
+   _Extend(naming.Check(lines, path))
+   _Extend(self_assignment_alignment.Check(lines, path))
+   _Extend(class_body_alignment.Check(lines, path))
+   _Extend(hoisting.Check(lines, path))
+   _Extend(indentation.Check(lines, path))
 
    return sorted(violations)
