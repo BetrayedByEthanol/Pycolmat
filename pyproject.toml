@@ -16,6 +16,7 @@ customfmt       = "customfmt.cli:_EntryMain"
 try-auto-format = "customfmt.cli:_EntryFix"
 check-format    = "customfmt.cli:_EntryCheck"
 create-index    = "customfmt.cli:_EntryIndex"
+resolve-index   = "customfmt.cli:_EntryResolve"
 
 [tool.setuptools.packages.find]
 include = ["customfmt*"]

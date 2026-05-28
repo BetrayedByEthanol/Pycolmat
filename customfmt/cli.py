@@ -6,7 +6,8 @@ Commands
   customfmt fix [--check] [--diff] [--quiet] <paths...>
   customfmt check [--quiet] [--json] <paths...>
   customfmt rename [--check | --diff | --apply] <paths...>
-  customfmt index  [--pretty] [--output PATH] <paths...>
+  customfmt index   [--pretty] [--output PATH] <paths...>
+  customfmt resolve [--pretty] [--output PATH] <paths...>
 
 Aliases (console_scripts)
 --------------------------
@@ -37,6 +38,7 @@ from customfmt.formatter import ProcessFile
 from customfmt.indexer import IndexPaths
 from customfmt.io import WriteUtf8Lf
 from customfmt.renamer import AnalyseFile
+from customfmt.symbols.resolver import ResolveFile, ResolveResultSet
 from customfmt.types import Violation
 
 # ---------------------------------------------------------------------------
@@ -175,6 +177,30 @@ def _BuildParser(prog: str = "customfmt") -> argparse.ArgumentParser:
       help="Pretty-print JSON with indentation.",
    )
    idx_p.add_argument(
+      "--output",
+      metavar="PATH",
+      default=None,
+      help="Write JSON to PATH instead of stdout.",
+   )
+
+   # -- resolve --------------------------------------------------------------
+   res_p = sub.add_parser(
+      "resolve",
+      help="Build a per-file resolved symbol graph.",
+      description=(
+         "Walk Python files, build a scope tree, and resolve name references "
+         "to their definitions within each file. Does not modify any files."
+      ),
+   )
+   res_p.add_argument(
+      "paths", nargs="+", metavar="PATH", help="Files or directories to resolve."
+   )
+   res_p.add_argument(
+      "--pretty",
+      action="store_true",
+      help="Pretty-print JSON with indentation.",
+   )
+   res_p.add_argument(
       "--output",
       metavar="PATH",
       default=None,
@@ -364,6 +390,43 @@ def _CmdIndex(args: argparse.Namespace) -> int:
    return 0
 
 
+def _CmdResolve(args: argparse.Namespace) -> int:
+   import json as _json
+
+   try:
+      files = CollectFiles(args.paths)
+   except FileNotFoundError as exc:
+      print(f"customfmt: error: {exc}", file=sys.stderr)
+      return 2
+
+   if not files:
+      print("customfmt: no Python files found.", file=sys.stderr)
+      return 2
+
+   result_set = ResolveResultSet()
+   for path in files:
+      result = ResolveFile(path)
+      from customfmt.symbols.model import FileError
+      if isinstance(result, FileError):
+         result_set.Errors.append(result)
+      else:
+         result_set.Files.append(result)
+
+   indent = 2 if args.pretty else None
+   serialised = _json.dumps(result_set.ToDict(), indent=indent)
+
+   if args.output:
+      try:
+         WriteUtf8Lf(Path(args.output), serialised + "\n")
+      except OSError as exc:
+         print(f"customfmt: error writing {args.output}: {exc}", file=sys.stderr)
+         return 2
+   else:
+      print(serialised)
+
+   return 0
+
+
 # ---------------------------------------------------------------------------
 # Entry points
 # ---------------------------------------------------------------------------
@@ -382,6 +445,8 @@ def Main(argv: list[str] | None = None, *, prog: str = "customfmt") -> int:
          return _CmdRename(args)
       elif args.command == "index":
          return _CmdIndex(args)
+      elif args.command == "resolve":
+         return _CmdResolve(args)
       else:  # pragma: no cover
          parser.print_help()
          return 2
@@ -423,3 +488,13 @@ def MainIndex(argv: list[str] | None = None) -> int:
 
 def _EntryIndex() -> None:
    sys.exit(MainIndex())
+
+
+def MainResolve(argv: list[str] | None = None) -> int:
+   """Entry point for ``resolve-index`` alias."""
+   effective = ["resolve"] + (sys.argv[1:] if argv is None else argv)
+   return Main(effective, prog="resolve-index")
+
+
+def _EntryResolve() -> None:
+   sys.exit(MainResolve())
