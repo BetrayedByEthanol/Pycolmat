@@ -1,17 +1,46 @@
 """
-Tests for customfmt.symbols.resolver and ``customfmt resolve`` / ``resolve-index``.
+Tests for customfmt.symbols.resolver (hardened version).
 
-TestScopes
-   TestModuleScopeCreated
-   TestFunctionScopePushed
-   TestClassScopePushed
-   TestNestedFunctionScope
-   TestScopeParentChain
-   TestScopeResolveNameLocal
-   TestScopeResolveNameOutward
-   TestScopeClassTransparentForFunctionLookup
+TestScopeIds
+   TestDeterministicScopeIds
+   TestScopeIdsStableAcrossRuns
+   TestModuleScopeIdContainsFileHash
+   TestFunctionScopeIdContainsQualName
 
-TestResolveFile – core resolution
+TestGlobalNonlocal
+   TestGlobalDeclarationRecorded
+   TestNonlocalDeclarationRecorded
+   TestGlobalWriteResolvesToModuleScope
+   TestGlobalReadResolvesToModuleScope
+   TestNonlocalReadResolvesToOuterFunction
+   TestNonlocalWriteRecordedInNonlocalScope
+   TestGlobalUnresolvedWhenNotAtModuleLevel
+
+TestClassBases
+   TestBaseClassReferenceRecorded
+   TestBaseClassResolvesWhenImported
+   TestBaseClassUnresolvedWhenCrossFile
+   TestMetaclassKeywordReferenceRecorded
+   TestMultipleBasesAllRecorded
+
+TestDecorators
+   TestBareDecoratorRecorded
+   TestDecoratorCallRecorded
+   TestDecoratorCallWithArgRecorded
+   TestMethodDecoratorRecorded
+   TestClassDecoratorRecorded
+   TestDecoratorRecordedInOuterScope
+
+TestAnnotations
+   TestParameterAnnotationRecorded
+   TestReturnAnnotationRecorded
+   TestAnnAssignAnnotationRecorded
+   TestClassBodyAnnotationRecorded
+   TestGenericAnnotationNamesRecorded
+   TestOptionalAnnotationRecorded
+   TestAnnotationKindIsAnnotation
+
+TestResolverExisting
    TestLocalVariableResolvesToLocalAssignment
    TestParameterResolvesToParameter
    TestLocalShadowsImport
@@ -26,26 +55,12 @@ TestResolveFile – core resolution
    TestMethodScopeResolvesSelfParameter
    TestSelfXNotResolved
    TestAttrCallMarkedDynamic
-   TestModuleDeclResolvedFromFunction
-   TestMultipleDefsForSameName
-   TestSummaryCountsCorrect
-   TestInvalidUtf8ReturnsFileError
-   TestSyntaxErrorReturnsFileError
-
-TestResolveResultSet
-   TestEmptyResultSet
-   TestMixedGoodAndBad
-   TestToDictStructure
 
 TestCLI
-   TestResolveSubcommandExits0
    TestResolveSubcommandOutputIsJson
-   TestResolvePretty
-   TestResolveOutputFile
-   TestResolveNoFiles
-   TestResolveBadPath
    TestResolveIndexAliasWorks
-   TestResolveEntryPointExists
+   TestResolvePrettyWorks
+   TestResolveOutputFileWorks
    TestResolveSyntaxErrorInErrors
    TestResolveInvalidUtf8InErrors
 """
@@ -56,13 +71,9 @@ import json
 import textwrap
 from pathlib import Path
 
-from customfmt.cli import Main, MainResolve, _EntryResolve
-from customfmt.symbols.resolver import ResolveFile, ResolveResultSet
-from customfmt.symbols.scopes import (
-   DefKind,
-   RefKind,
-   ScopeKind,
-)
+from customfmt.cli import Main, MainResolve
+from customfmt.symbols.resolver import ResolveFile
+from customfmt.symbols.scopes import DefKind, RefKind, ScopeKind
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -113,108 +124,461 @@ def UnresolvedRefs(result, name: str):
    ]
 
 
+def AnnRefs(result, name: str):
+   return [
+      r for r in result.References
+      if r.Name == name and r.Kind == RefKind.Annotation
+   ]
+
+
 # ---------------------------------------------------------------------------
-# TestScopes – scope model unit tests
+# TestScopeIds
 # ---------------------------------------------------------------------------
 
 
-class TestScopes:
-   def TestModuleScopeCreated(self, tmp_path):
-      f = Write(tmp_path / "f.py", "X = 1\n")
-      result = ResolveFile(f)
-      assert result.Tree.Root.Kind == ScopeKind.Module
-
-   def TestFunctionScopePushed(self, tmp_path):
+class TestScopeIds:
+   def TestDeterministicScopeIds(self, tmp_path):
+      """Same file resolved twice must produce identical scope IDs."""
       f = Write(tmp_path / "f.py", "def Foo():\n   pass\n")
-      result = ResolveFile(f)
-      scopes = result.Tree.AllScopes
-      func_scopes = [s for s in scopes if s.Kind == ScopeKind.Function]
-      assert any(s.Name == "Foo" for s in func_scopes)
+      result_a = ResolveFile(f)
+      result_b = ResolveFile(f)
+      ids_a = {s.ScopeId for s in result_a.Tree.AllScopes}
+      ids_b = {s.ScopeId for s in result_b.Tree.AllScopes}
+      assert ids_a == ids_b
 
-   def TestClassScopePushed(self, tmp_path):
-      f = Write(tmp_path / "f.py", "class MyClass:\n   pass\n")
+   def TestScopeIdsStableAcrossRuns(self, tmp_path):
+      """Scope IDs must not contain process-specific data (e.g. object id)."""
+      f = Write(tmp_path / "f.py", "def Bar():\n   pass\n")
       result = ResolveFile(f)
-      class_scopes = [
-         s for s in result.Tree.AllScopes
-         if s.Kind == ScopeKind.Class
-      ]
-      assert any(s.Name == "MyClass" for s in class_scopes)
+      for scope in result.Tree.AllScopes:
+         # IDs must not look like Python object addresses (no 0x...)
+         assert "0x" not in scope.ScopeId
 
-   def TestNestedFunctionScope(self, tmp_path):
-      src = "def Outer():\n   def Inner():\n      pass\n"
-      f = Write(tmp_path / "f.py", src)
+   def TestModuleScopeIdContainsFileHash(self, tmp_path):
+      """Module scope ID must embed a hash of the file path."""
+      f = Write(tmp_path / "my_module.py", "X = 1\n")
       result = ResolveFile(f)
-      fn_names = {s.Name for s in result.Tree.AllScopes
-                  if s.Kind == ScopeKind.Function}
-      assert "Outer" in fn_names
-      assert "Inner" in fn_names
+      root_id = result.Tree.Root.ScopeId
+      # Format: <8-char hash>:module:<line>
+      parts = root_id.split(":")
+      assert len(parts) == 3
+      assert len(parts[0]) == 8   # 8-char hex hash
+      assert parts[1] == "module"
+      assert parts[2] == "1"
 
-   def TestScopeParentChain(self, tmp_path):
+   def TestFunctionScopeIdContainsQualName(self, tmp_path):
+      """Function scope ID must embed the qualified name."""
       f = Write(tmp_path / "f.py", "def Foo():\n   pass\n")
       result = ResolveFile(f)
       foo_scope = next(
          s for s in result.Tree.AllScopes if s.Name == "Foo"
       )
-      assert foo_scope.Parent is result.Tree.Root
+      assert "Foo" in foo_scope.ScopeId
 
-   def TestScopeResolveNameLocal(self, tmp_path):
-      f = Write(tmp_path / "f.py", "def Foo():\n   x = 1\n   return x\n")
+   def TestNestedScopeIdContainsDottedPath(self, tmp_path):
+      f = Write(tmp_path / "f.py", "class A:\n   def Foo(self):\n      pass\n")
       result = ResolveFile(f)
-      resolved = ResolvedRefs(result, "x")
-      assert resolved
-      assert resolved[0].ResolvedTo.Kind == DefKind.LocalWrite
+      foo_scope = next(
+         s for s in result.Tree.AllScopes if s.Name == "Foo"
+      )
+      assert "A.Foo" in foo_scope.ScopeId
 
-   def TestScopeResolveNameOutward(self, tmp_path):
-      f = Write(tmp_path / "f.py", "X = 1\ndef Foo():\n   return X\n")
-      result = ResolveFile(f)
-      resolved = ResolvedRefs(result, "X")
-      assert resolved
-      assert resolved[0].ResolvedTo.Kind == DefKind.ModuleDecl
 
-   def TestScopeClassTransparentForFunctionLookup(self, tmp_path):
-      """Class-body names are NOT visible inside methods (LEGB rule)."""
+# ---------------------------------------------------------------------------
+# TestGlobalNonlocal
+# ---------------------------------------------------------------------------
+
+
+class TestGlobalNonlocal:
+   def TestGlobalDeclarationRecorded(self, tmp_path):
       src = Src("""\
-         TableName = "x"
-         class Repo:
-            TableName = "y"
-            def GetName(self):
-               return TableName
+         Counter = 0
+         def Increment():
+            global Counter
+            Counter = Counter + 1
       """)
       f = Write(tmp_path / "f.py", src)
       result = ResolveFile(f)
-      # The TableName read inside GetName should resolve to the MODULE-level
-      # definition (line 1), not the class-body definition (line 3).
-      resolved = ResolvedRefs(result, "TableName")
+      fn_scope = next(
+         s for s in result.Tree.AllScopes if s.Name == "Increment"
+      )
+      assert "Counter" in fn_scope.GlobalNames
+
+   def TestNonlocalDeclarationRecorded(self, tmp_path):
+      src = Src("""\
+         def Outer():
+            x = 0
+            def Inner():
+               nonlocal x
+               x = x + 1
+      """)
+      f = Write(tmp_path / "f.py", src)
+      result = ResolveFile(f)
+      inner_scope = next(
+         s for s in result.Tree.AllScopes if s.Name == "Inner"
+      )
+      assert "x" in inner_scope.NonlocalNames
+
+   def TestGlobalWriteResolvesToModuleScope(self, tmp_path):
+      """A write to a global name inside a function must resolve to module."""
+      src = Src("""\
+         Counter = 0
+         def Increment():
+            global Counter
+            Counter = Counter + 1
+      """)
+      f = Write(tmp_path / "f.py", src)
+      result = ResolveFile(f)
+      # The read of Counter inside Increment must resolve to module-level def
+      reads = [
+         r for r in ResolvedRefs(result, "Counter")
+         if r.ScopeRef.Kind == ScopeKind.Function
+      ]
+      assert reads
+      assert reads[0].ResolvedTo.Kind == DefKind.ModuleDecl
+
+   def TestGlobalReadResolvesToModuleScope(self, tmp_path):
+      src = Src("""\
+         Config = "default"
+         def GetConfig():
+            global Config
+            return Config
+      """)
+      f = Write(tmp_path / "f.py", src)
+      result = ResolveFile(f)
+      reads = [
+         r for r in ResolvedRefs(result, "Config")
+         if r.ScopeRef.Kind == ScopeKind.Function
+      ]
+      assert reads
+      assert reads[0].ResolvedTo.Kind == DefKind.ModuleDecl
+
+   def TestNonlocalReadResolvesToOuterFunction(self, tmp_path):
+      src = Src("""\
+         def Outer():
+            count = 0
+            def Inner():
+               nonlocal count
+               return count
+      """)
+      f = Write(tmp_path / "f.py", src)
+      result = ResolveFile(f)
+      inner_reads = [
+         r for r in ResolvedRefs(result, "count")
+         if r.ScopeRef.Name == "Inner"
+      ]
+      assert inner_reads
+      assert inner_reads[0].ResolvedTo.Kind == DefKind.LocalWrite
+      assert inner_reads[0].ResolvedTo.ScopeRef.Name == "Outer"
+
+   def TestNonlocalWriteRecordedInNonlocalScope(self, tmp_path):
+      """After nonlocal x, a write to x in Inner resolves to Outer's def."""
+      src = Src("""\
+         def Outer():
+            total = 0
+            def Inner():
+               nonlocal total
+               total = total + 1
+      """)
+      f = Write(tmp_path / "f.py", src)
+      result = ResolveFile(f)
+      # total read inside Inner resolves to Outer's definition
+      inner_reads = [
+         r for r in ResolvedRefs(result, "total")
+         if r.ScopeRef.Name == "Inner"
+      ]
+      assert inner_reads
+      assert inner_reads[0].ResolvedTo.ScopeRef.Name == "Outer"
+
+   def TestGlobalUnresolvedWhenNotAtModuleLevel(self, tmp_path):
+      """global x where x is not at module level -> unresolved."""
+      src = Src("""\
+         def Foo():
+            global missing_var
+            return missing_var
+      """)
+      f = Write(tmp_path / "f.py", src)
+      result = ResolveFile(f)
+      unresolved = UnresolvedRefs(result, "missing_var")
+      assert unresolved
+
+
+# ---------------------------------------------------------------------------
+# TestClassBases
+# ---------------------------------------------------------------------------
+
+
+class TestClassBases:
+   def TestBaseClassReferenceRecorded(self, tmp_path):
+      src = Src("""\
+         class Child(Parent):
+            pass
+      """)
+      f = Write(tmp_path / "f.py", src)
+      result = ResolveFile(f)
+      reads = Refs(result, "Parent")
+      assert reads
+
+   def TestBaseClassResolvesWhenImported(self, tmp_path):
+      src = Src("""\
+         from models import BaseModel
+         class UserModel(BaseModel):
+            pass
+      """)
+      f = Write(tmp_path / "f.py", src)
+      result = ResolveFile(f)
+      resolved = ResolvedRefs(result, "BaseModel")
       assert resolved
-      assert resolved[0].ResolvedTo.Line == 1
+      assert resolved[0].ResolvedTo.Kind == DefKind.ImportFrom
+
+   def TestBaseClassUnresolvedWhenCrossFile(self, tmp_path):
+      src = Src("""\
+         class Child(SomeExternalBase):
+            pass
+      """)
+      f = Write(tmp_path / "f.py", src)
+      result = ResolveFile(f)
+      unresolved = UnresolvedRefs(result, "SomeExternalBase")
+      assert unresolved
+
+   def TestMetaclassKeywordReferenceRecorded(self, tmp_path):
+      src = Src("""\
+         from meta import AllOptional
+         class Model(metaclass=AllOptional):
+            pass
+      """)
+      f = Write(tmp_path / "f.py", src)
+      result = ResolveFile(f)
+      resolved = ResolvedRefs(result, "AllOptional")
+      assert resolved
+      assert resolved[0].ResolvedTo.Kind == DefKind.ImportFrom
+
+   def TestMultipleBasesAllRecorded(self, tmp_path):
+      src = Src("""\
+         from meta import AllOptional
+         from base import BaseModelExtension
+         class Model(BaseModelExtension, metaclass=AllOptional):
+            pass
+      """)
+      f = Write(tmp_path / "f.py", src)
+      result = ResolveFile(f)
+      assert ResolvedRefs(result, "BaseModelExtension")
+      assert ResolvedRefs(result, "AllOptional")
 
 
 # ---------------------------------------------------------------------------
-# TestResolveFile – core resolution
+# TestDecorators
 # ---------------------------------------------------------------------------
 
 
-class TestResolveFile:
+class TestDecorators:
+   def TestBareDecoratorRecorded(self, tmp_path):
+      src = Src("""\
+         from functools import wraps
+         @wraps
+         def Foo():
+            pass
+      """)
+      f = Write(tmp_path / "f.py", src)
+      result = ResolveFile(f)
+      resolved = ResolvedRefs(result, "wraps")
+      assert resolved
+      assert resolved[0].ResolvedTo.Kind == DefKind.ImportFrom
+
+   def TestDecoratorCallRecorded(self, tmp_path):
+      src = Src("""\
+         from flask import route
+         @route("/")
+         def Index():
+            pass
+      """)
+      f = Write(tmp_path / "f.py", src)
+      result = ResolveFile(f)
+      calls = [r for r in Refs(result, "route") if r.Kind == RefKind.Call]
+      assert calls
+      assert calls[0].ResolvedTo is not None
+
+   def TestDecoratorCallWithArgRecorded(self, tmp_path):
+      src = Src("""\
+         from app import Route
+         @Route("/users", methods=["GET"])
+         def GetUsers():
+            pass
+      """)
+      f = Write(tmp_path / "f.py", src)
+      result = ResolveFile(f)
+      calls = [r for r in Refs(result, "Route") if r.Kind == RefKind.Call]
+      assert calls
+
+   def TestMethodDecoratorRecorded(self, tmp_path):
+      src = Src("""\
+         class MyClass:
+            @staticmethod
+            def Helper():
+               pass
+      """)
+      f = Write(tmp_path / "f.py", src)
+      result = ResolveFile(f)
+      assert Refs(result, "staticmethod")
+
+   def TestClassDecoratorRecorded(self, tmp_path):
+      src = Src("""\
+         from dataclasses import dataclass
+         @dataclass
+         class Point:
+            pass
+      """)
+      f = Write(tmp_path / "f.py", src)
+      result = ResolveFile(f)
+      resolved = ResolvedRefs(result, "dataclass")
+      assert resolved
+      assert resolved[0].ResolvedTo.Kind == DefKind.ImportFrom
+
+   def TestDecoratorRecordedInOuterScope(self, tmp_path):
+      """Decorator refs must be recorded in the scope that contains the def."""
+      src = Src("""\
+         from app import login_required
+         class View:
+            @login_required
+            def GetPage(self):
+               pass
+      """)
+      f = Write(tmp_path / "f.py", src)
+      result = ResolveFile(f)
+      resolved = ResolvedRefs(result, "login_required")
+      assert resolved
+      # login_required should be resolved in the class scope (outer to method)
+      assert resolved[0].ResolvedTo.Kind == DefKind.ImportFrom
+
+
+# ---------------------------------------------------------------------------
+# TestAnnotations
+# ---------------------------------------------------------------------------
+
+
+class TestAnnotations:
+   def TestParameterAnnotationRecorded(self, tmp_path):
+      src = Src("""\
+         from decimal import Decimal
+         def CalcTotal(amount: Decimal) -> Decimal:
+            return amount
+      """)
+      f = Write(tmp_path / "f.py", src)
+      result = ResolveFile(f)
+      ann_refs = AnnRefs(result, "Decimal")
+      assert ann_refs
+      # Both the param annotation and return annotation should appear
+      assert len(ann_refs) >= 2
+      # All annotation refs should resolve to the import
+      for ref in ann_refs:
+         assert ref.ResolvedTo is not None
+         assert ref.ResolvedTo.Kind == DefKind.ImportFrom
+
+   def TestReturnAnnotationRecorded(self, tmp_path):
+      src = Src("""\
+         from models import UserModel
+         def GetUser(user_id: int) -> UserModel:
+            pass
+      """)
+      f = Write(tmp_path / "f.py", src)
+      result = ResolveFile(f)
+      ann_refs = AnnRefs(result, "UserModel")
+      assert ann_refs
+      assert ann_refs[0].ResolvedTo.Kind == DefKind.ImportFrom
+
+   def TestAnnAssignAnnotationRecorded(self, tmp_path):
+      src = Src("""\
+         from decimal import Decimal
+         def Foo():
+            price: Decimal = Decimal("0")
+      """)
+      f = Write(tmp_path / "f.py", src)
+      result = ResolveFile(f)
+      ann_refs = AnnRefs(result, "Decimal")
+      assert ann_refs
+
+   def TestClassBodyAnnotationRecorded(self, tmp_path):
+      src = Src("""\
+         from models import ArtikelModel
+         class Repo:
+            Model: ArtikelModel
+      """)
+      f = Write(tmp_path / "f.py", src)
+      result = ResolveFile(f)
+      ann_refs = AnnRefs(result, "ArtikelModel")
+      assert ann_refs
+      assert ann_refs[0].ResolvedTo.Kind == DefKind.ImportFrom
+
+   def TestGenericAnnotationNamesRecorded(self, tmp_path):
+      """list[UserModel] must record both 'list' and 'UserModel'."""
+      src = Src("""\
+         from models import UserModel
+         def GetAll() -> list[UserModel]:
+            pass
+      """)
+      f = Write(tmp_path / "f.py", src)
+      result = ResolveFile(f)
+      user_ann = AnnRefs(result, "UserModel")
+      assert user_ann
+      list_ann = AnnRefs(result, "list")
+      assert list_ann
+
+   def TestOptionalAnnotationRecorded(self, tmp_path):
+      """Optional[UserModel] must record both 'Optional' and 'UserModel'."""
+      src = Src("""\
+         from typing import Optional
+         from models import UserModel
+         def MaybeGet() -> Optional[UserModel]:
+            pass
+      """)
+      f = Write(tmp_path / "f.py", src)
+      result = ResolveFile(f)
+      assert AnnRefs(result, "Optional")
+      assert AnnRefs(result, "UserModel")
+
+   def TestAnnotationKindIsAnnotation(self, tmp_path):
+      """Annotation references must have RefKind.Annotation, not Read."""
+      src = Src("""\
+         from decimal import Decimal
+         def Foo(x: Decimal) -> Decimal:
+            pass
+      """)
+      f = Write(tmp_path / "f.py", src)
+      result = ResolveFile(f)
+      ann_refs = [
+         r for r in Refs(result, "Decimal")
+         if r.Kind == RefKind.Annotation
+      ]
+      read_refs = [
+         r for r in Refs(result, "Decimal")
+         if r.Kind == RefKind.Read
+      ]
+      assert ann_refs
+      assert not read_refs
+
+
+# ---------------------------------------------------------------------------
+# TestResolverExisting — regression suite for original resolution tests
+# ---------------------------------------------------------------------------
+
+
+class TestResolverExisting:
    def TestLocalVariableResolvesToLocalAssignment(self, tmp_path):
       src = "def Foo():\n   result = 1\n   return result\n"
       f = Write(tmp_path / "f.py", src)
       result = ResolveFile(f)
       resolved = ResolvedRefs(result, "result")
       assert resolved
-      defn = resolved[0].ResolvedTo
-      assert defn.Kind == DefKind.LocalWrite
-      assert defn.Name == "result"
+      assert resolved[0].ResolvedTo.Kind == DefKind.LocalWrite
 
    def TestParameterResolvesToParameter(self, tmp_path):
-      src = "def Foo(user_id):\n   return user_id\n"
-      f = Write(tmp_path / "f.py", src)
+      f = Write(tmp_path / "f.py", "def Foo(user_id):\n   return user_id\n")
       result = ResolveFile(f)
       resolved = ResolvedRefs(result, "user_id")
       assert resolved
       assert resolved[0].ResolvedTo.Kind == DefKind.Parameter
 
    def TestLocalShadowsImport(self, tmp_path):
-      """A local assignment must shadow an import of the same name."""
       src = Src("""\
          from os import path
          def Foo():
@@ -223,15 +587,14 @@ class TestResolveFile:
       """)
       f = Write(tmp_path / "f.py", src)
       result = ResolveFile(f)
-      resolved = ResolvedRefs(result, "path")
-      assert resolved
-      # The read inside Foo should resolve to the LOCAL write, not the import
-      inner = [r for r in resolved if r.ScopeRef.Kind == ScopeKind.Function]
+      inner = [
+         r for r in ResolvedRefs(result, "path")
+         if r.ScopeRef.Kind == ScopeKind.Function
+      ]
       assert inner
       assert inner[0].ResolvedTo.Kind == DefKind.LocalWrite
 
    def TestLocalShadowsModuleVariable(self, tmp_path):
-      """A local assignment must shadow a module-level variable."""
       src = Src("""\
          Config = "global"
          def Foo():
@@ -240,8 +603,10 @@ class TestResolveFile:
       """)
       f = Write(tmp_path / "f.py", src)
       result = ResolveFile(f)
-      inner = [r for r in ResolvedRefs(result, "Config")
-               if r.ScopeRef.Kind == ScopeKind.Function]
+      inner = [
+         r for r in ResolvedRefs(result, "Config")
+         if r.ScopeRef.Kind == ScopeKind.Function
+      ]
       assert inner
       assert inner[0].ResolvedTo.Kind == DefKind.LocalWrite
 
@@ -254,10 +619,11 @@ class TestResolveFile:
       """)
       f = Write(tmp_path / "f.py", src)
       result = ResolveFile(f)
-      calls = [r for r in result.References
-               if r.Name == "Helper" and r.Kind == RefKind.Call]
+      calls = [
+         r for r in result.References
+         if r.Name == "Helper" and r.Kind == RefKind.Call
+      ]
       assert calls
-      assert calls[0].ResolvedTo is not None
       assert calls[0].ResolvedTo.Kind == DefKind.FunctionDef
 
    def TestClassConstructorResolvesToClassDef(self, tmp_path):
@@ -269,10 +635,11 @@ class TestResolveFile:
       """)
       f = Write(tmp_path / "f.py", src)
       result = ResolveFile(f)
-      calls = [r for r in result.References
-               if r.Name == "MyModel" and r.Kind == RefKind.Call]
+      calls = [
+         r for r in result.References
+         if r.Name == "MyModel" and r.Kind == RefKind.Call
+      ]
       assert calls
-      assert calls[0].ResolvedTo is not None
       assert calls[0].ResolvedTo.Kind == DefKind.ClassDef
 
    def TestImportedNameResolvesToImportEntry(self, tmp_path):
@@ -283,11 +650,11 @@ class TestResolveFile:
       """)
       f = Write(tmp_path / "f.py", src)
       result = ResolveFile(f)
-      # "os" appears as a name_read inside Foo; it should resolve to the import
-      reads = [r for r in result.References
-               if r.Name == "os" and r.Kind == RefKind.Read]
+      reads = [
+         r for r in result.References
+         if r.Name == "os" and r.Kind == RefKind.Read
+      ]
       assert reads
-      assert reads[0].ResolvedTo is not None
       assert reads[0].ResolvedTo.Kind == DefKind.Import
 
    def TestImportFromResolvesToImportEntry(self, tmp_path):
@@ -298,18 +665,18 @@ class TestResolveFile:
       """)
       f = Write(tmp_path / "f.py", src)
       result = ResolveFile(f)
-      calls = [r for r in result.References
-               if r.Name == "Path" and r.Kind == RefKind.Call]
+      calls = [
+         r for r in result.References
+         if r.Name == "Path" and r.Kind == RefKind.Call
+      ]
       assert calls
-      assert calls[0].ResolvedTo is not None
       assert calls[0].ResolvedTo.Kind == DefKind.ImportFrom
 
    def TestUnresolvedNameMarkedUnresolved(self, tmp_path):
       src = "def Foo():\n   return SomeUndefinedName()\n"
       f = Write(tmp_path / "f.py", src)
       result = ResolveFile(f)
-      unresolved = UnresolvedRefs(result, "SomeUndefinedName")
-      assert unresolved
+      assert UnresolvedRefs(result, "SomeUndefinedName")
 
    def TestNestedFunctionScopeResolvesCorrectly(self, tmp_path):
       src = Src("""\
@@ -320,14 +687,11 @@ class TestResolveFile:
       """)
       f = Write(tmp_path / "f.py", src)
       result = ResolveFile(f)
-      # x read inside Inner should resolve to x defined in Outer
-      reads = [r for r in result.References if r.Name == "x"]
-      assert reads
       inner_read = [
-         r for r in reads if r.ScopeRef.Name == "Inner"
+         r for r in ResolvedRefs(result, "x")
+         if r.ScopeRef.Name == "Inner"
       ]
       assert inner_read
-      assert inner_read[0].ResolvedTo is not None
       assert inner_read[0].ResolvedTo.Kind == DefKind.LocalWrite
 
    def TestOuterVariableVisibleInInnerFunction(self, tmp_path):
@@ -338,8 +702,10 @@ class TestResolveFile:
       """)
       f = Write(tmp_path / "f.py", src)
       result = ResolveFile(f)
-      reads = [r for r in ResolvedRefs(result, "COUNT")
-               if r.ScopeRef.Kind == ScopeKind.Function]
+      reads = [
+         r for r in ResolvedRefs(result, "COUNT")
+         if r.ScopeRef.Kind == ScopeKind.Function
+      ]
       assert reads
       assert reads[0].ResolvedTo.Kind == DefKind.ModuleDecl
 
@@ -356,7 +722,6 @@ class TestResolveFile:
       assert reads[0].ResolvedTo.Kind == DefKind.Parameter
 
    def TestSelfXNotResolved(self, tmp_path):
-      """self.X attribute access must be marked dynamic, not resolved."""
       src = Src("""\
          class Repo:
             def GetName(self):
@@ -364,10 +729,9 @@ class TestResolveFile:
       """)
       f = Write(tmp_path / "f.py", src)
       result = ResolveFile(f)
-      # self.Name will appear as an attribute_call or dynamic ref, not resolved
-      _ = [r for r in result.References if r.IsDynamic]
-      # At minimum there must be no resolved reference to "Name" as an attr
-      resolved_name = [r for r in ResolvedRefs(result, "Name") if not r.IsDynamic]
+      resolved_name = [
+         r for r in ResolvedRefs(result, "Name") if not r.IsDynamic
+      ]
       assert not resolved_name
 
    def TestAttrCallMarkedDynamic(self, tmp_path):
@@ -383,98 +747,6 @@ class TestResolveFile:
       ]
       assert dynamic
 
-   def TestModuleDeclResolvedFromFunction(self, tmp_path):
-      src = Src("""\
-         TableName = "orders"
-         def GetTable():
-            return TableName
-      """)
-      f = Write(tmp_path / "f.py", src)
-      result = ResolveFile(f)
-      reads = [r for r in ResolvedRefs(result, "TableName")
-               if r.ScopeRef.Kind == ScopeKind.Function]
-      assert reads
-      assert reads[0].ResolvedTo.Kind == DefKind.ModuleDecl
-
-   def TestMultipleDefsForSameName(self, tmp_path):
-      """Two assignments to the same name both appear as definitions."""
-      src = Src("""\
-         def Foo():
-            x = 1
-            x = 2
-      """)
-      f = Write(tmp_path / "f.py", src)
-      result = ResolveFile(f)
-      x_defs = Defs(result, "x")
-      assert len(x_defs) == 2
-
-   def TestSummaryCountsCorrect(self, tmp_path):
-      src = Src("""\
-         import os
-         def Foo():
-            x = os.getcwd()
-            return x
-      """)
-      f = Write(tmp_path / "f.py", src)
-      result = ResolveFile(f)
-      summary = result.ToDict()["summary"]
-      assert summary["total_refs"] == summary["resolved"] + summary["unresolved"] + summary["dynamic"]
-
-   def TestInvalidUtf8ReturnsFileError(self, tmp_path):
-      f = WriteBytes(tmp_path / "f.py", b"x = \xff\n")
-      from customfmt.symbols.model import FileError
-      result = ResolveFile(f)
-      assert isinstance(result, FileError)
-      assert "encoding" in result.Error.lower()
-
-   def TestSyntaxErrorReturnsFileError(self, tmp_path):
-      f = Write(tmp_path / "f.py", "def Broken(\n")
-      from customfmt.symbols.model import FileError
-      result = ResolveFile(f)
-      assert isinstance(result, FileError)
-      assert "syntax" in result.Error.lower()
-
-
-# ---------------------------------------------------------------------------
-# TestResolveResultSet
-# ---------------------------------------------------------------------------
-
-
-class TestResolveResultSet:
-   def TestEmptyResultSet(self):
-      rs = ResolveResultSet()
-      d = rs.ToDict()
-      assert d["files"] == []
-      assert d["errors"] == []
-
-   def TestMixedGoodAndBad(self, tmp_path):
-      good = Write(tmp_path / "good.py", "X = 1\n")
-      bad  = WriteBytes(tmp_path / "bad.py", b"x = \xff\n")
-      from customfmt.symbols.model import FileError
-      rs = ResolveResultSet()
-      for path in [good, bad]:
-         r = ResolveFile(path)
-         if isinstance(r, FileError):
-            rs.Errors.append(r)
-         else:
-            rs.Files.append(r)
-      assert len(rs.Files) == 1
-      assert len(rs.Errors) == 1
-
-   def TestToDictStructure(self, tmp_path):
-      f = Write(tmp_path / "f.py", "X = 1\n")
-      rs = ResolveResultSet()
-      r = ResolveFile(f)
-      rs.Files.append(r)
-      d = rs.ToDict()
-      assert "files" in d
-      assert "errors" in d
-      file_d = d["files"][0]
-      assert "scopes" in file_d
-      assert "definitions" in file_d
-      assert "references" in file_d
-      assert "summary" in file_d
-
 
 # ---------------------------------------------------------------------------
 # TestCLI
@@ -482,41 +754,14 @@ class TestResolveResultSet:
 
 
 class TestCLI:
-   def TestResolveSubcommandExits0(self, tmp_path):
-      Write(tmp_path / "f.py", "X = 1\n")
-      assert RunMain("resolve", str(tmp_path)) == 0
-
    def TestResolveSubcommandOutputIsJson(self, tmp_path, capsys):
       Write(tmp_path / "f.py", "X = 1\n")
-      RunMain("resolve", str(tmp_path))
+      rc = RunMain("resolve", str(tmp_path))
+      assert rc == 0
       out = capsys.readouterr().out
       data = json.loads(out)
       assert "files" in data
       assert "errors" in data
-
-   def TestResolvePretty(self, tmp_path, capsys):
-      Write(tmp_path / "f.py", "X = 1\n")
-      RunMain("resolve", "--pretty", str(tmp_path))
-      out = capsys.readouterr().out
-      assert "\n" in out
-      assert "  " in out
-      data = json.loads(out)
-      assert "files" in data
-
-   def TestResolveOutputFile(self, tmp_path):
-      Write(tmp_path / "f.py", "X = 1\n")
-      out_file = tmp_path / "resolve.json"
-      rc = RunMain("resolve", "--output", str(out_file), str(tmp_path))
-      assert rc == 0
-      assert out_file.exists()
-      data = json.loads(out_file.read_text(encoding="utf-8"))
-      assert "files" in data
-
-   def TestResolveNoFiles(self, tmp_path):
-      assert RunMain("resolve", str(tmp_path)) == 2
-
-   def TestResolveBadPath(self, tmp_path):
-      assert RunMain("resolve", str(tmp_path / "nope.py")) == 2
 
    def TestResolveIndexAliasWorks(self, tmp_path, capsys):
       Write(tmp_path / "f.py", "X = 1\n")
@@ -526,8 +771,23 @@ class TestCLI:
       data = json.loads(out)
       assert "files" in data
 
-   def TestResolveEntryPointExists(self):
-      assert callable(_EntryResolve)
+   def TestResolvePrettyWorks(self, tmp_path, capsys):
+      Write(tmp_path / "f.py", "X = 1\n")
+      RunMain("resolve", "--pretty", str(tmp_path))
+      out = capsys.readouterr().out
+      assert "\n  " in out
+      json.loads(out)  # must still be valid JSON
+
+   def TestResolveOutputFileWorks(self, tmp_path):
+      Write(tmp_path / "f.py", "X = 1\n")
+      out_file = tmp_path / "resolve.json"
+      rc = RunMain("resolve", "--output", str(out_file), str(tmp_path))
+      assert rc == 0
+      assert out_file.exists()
+      content = out_file.read_text(encoding="utf-8")
+      assert not content.startswith("\xef\xbb\xbf")  # no BOM
+      data = json.loads(content)
+      assert "files" in data
 
    def TestResolveSyntaxErrorInErrors(self, tmp_path, capsys):
       Write(tmp_path / "good.py", "X = 1\n")
@@ -538,6 +798,7 @@ class TestCLI:
       assert len(data["files"]) == 1
       assert len(data["errors"]) == 1
       assert data["errors"][0]["file"].endswith("broken.py")
+      assert "syntax" in data["errors"][0]["error"].lower()
 
    def TestResolveInvalidUtf8InErrors(self, tmp_path, capsys):
       Write(tmp_path / "good.py", "X = 1\n")

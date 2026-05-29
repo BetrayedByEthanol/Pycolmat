@@ -9,34 +9,37 @@ A Scope represents one lexical scope in a Python file:
 Scopes form a tree: every non-module scope has a parent.
 
 Each scope holds:
-  - Definitions : name -> list[Definition]  (a name can be defined multiple times,
-                  e.g. assigned in both branches of an if; we keep all sites)
-  - Children    : list[Scope]
+  - Defs          : name -> list[Definition]
+  - Refs          : list[Reference]
+  - GlobalNames   : set[str]   — names declared global in this function scope
+  - NonlocalNames : set[str]   — names declared nonlocal in this function scope
+  - Children      : list[Scope]
+
+Scope IDs
+---------
+IDs are deterministic: ``<file_hash>:<qual_name>:<line>`` so that they are
+stable across runs and useful for snapshot tests.
 
 Lookup
 ------
-ResolveName(name) walks from the innermost scope outward, returning the
-innermost Definition that covers the name.  This implements Python's
-LEGB lookup (Local, Enclosing, Global, Builtin) without the B layer
-(builtins are left as unresolved for now).
+ResolveName(name) walks from the innermost scope outward, implementing
+Python's LEGB lookup:
+  - global declarations redirect lookup to module scope immediately.
+  - nonlocal declarations skip the current scope and search outward from
+    the nearest enclosing function scope.
+  - Class scopes are transparent when searching from a function scope
+    (Python semantics: class-body names are not visible in methods).
 """
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass, field
 from enum import StrEnum
 
 # ---------------------------------------------------------------------------
 # Scope kinds
 # ---------------------------------------------------------------------------
-
-_SCOPE_COUNTER: list[int] = [0]
-
-
-def _NextScopeId() -> str:
-   _SCOPE_COUNTER[0] += 1
-   return f"scope_{_SCOPE_COUNTER[0]}"
-
 
 class ScopeKind(StrEnum):
    Module   = "module"
@@ -66,10 +69,10 @@ class Definition:
 
    Name     : str
    Kind     : DefKind
-   Line     : int      # 1-based
-   Col      : int      # 0-based
-   ScopeRef : Scope    # the scope that owns this definition
-   Extra    : dict                                           = field(default_factory=dict)
+   Line     : int
+   Col      : int
+   ScopeRef : Scope
+   Extra    : dict    = field(default_factory=dict)
 
    def ToDict(self) -> dict:
       return {
@@ -87,9 +90,10 @@ class Definition:
 # ---------------------------------------------------------------------------
 
 class RefKind(StrEnum):
-   Read     = "read"
-   Call     = "call"
-   AttrCall = "attribute_call"
+   Read       = "read"
+   Call       = "call"
+   AttrCall   = "attribute_call"
+   Annotation = "annotation"
 
 
 @dataclass
@@ -101,9 +105,9 @@ class Reference:
    Line         : int
    Col          : int
    ScopeRef     : Scope
-   ResolvedTo   : Definition | None = None     # set by resolver
-   IsUnresolved : bool              = False    # set by resolver when lookup fails
-   IsDynamic    : bool              = False    # set for attr calls / dynamic use
+   ResolvedTo   : Definition | None = None
+   IsUnresolved : bool              = False
+   IsDynamic    : bool              = False
    Extra        : dict              = field(default_factory=dict)
 
    def ToDict(self) -> dict:
@@ -128,23 +132,40 @@ class Reference:
       }
 
 
+# ---------------------------------------------------------------------------
+# Scope
+# ---------------------------------------------------------------------------
+
+def _MakeScopeId(file_path: str, qual_name: str, line: int) -> str:
+   """
+   Deterministic, snapshot-friendly scope ID.
+   Format: ``<8-char file hash>:<qual_name or 'module'>:<line>``.
+   """
+   file_hash = hashlib.sha1(file_path.encode()).hexdigest()[:8]
+   label = qual_name if qual_name else "module"
+   return f"{file_hash}:{label}:{line}"
 
 
 @dataclass
 class Scope:
    """One lexical scope."""
 
-   Kind     : ScopeKind
-   Name     : str          # "" for module, else class/function name
-   QualName : str          # dotted qualified name
-   Line     : int          # first line of the scope (1-based)
-   Parent   : Scope | None
-   ScopeId  : str                                                    = field(default_factory=_NextScopeId)
-   Children : list[Scope]                                            = field(default_factory=list)
-   # name -> list of definitions (all sites)
-   Defs       : dict[str, list[Definition]] = field(default_factory=dict)
-   # All references recorded in this scope (not children)
-   Refs       : list[Reference] = field(default_factory=list)
+   Kind          : ScopeKind
+   Name          : str
+   QualName      : str
+   Line          : int
+   Parent        : Scope | None
+   FilePath      : str                         = ""
+   ScopeId       : str                         = ""
+   Children      : list[Scope]                 = field(default_factory=list)
+   Defs          : dict[str, list[Definition]] = field(default_factory=dict)
+   Refs          : list[Reference]             = field(default_factory=list)
+   GlobalNames   : set[str]                    = field(default_factory=set)
+   NonlocalNames : set[str]                    = field(default_factory=set)
+
+   def __post_init__(self) -> None:
+      if not self.ScopeId:
+         self.ScopeId = _MakeScopeId(self.FilePath, self.QualName, self.Line)
 
    def AddDef(self, defn: Definition) -> None:
       self.Defs.setdefault(defn.Name, []).append(defn)
@@ -154,41 +175,75 @@ class Scope:
 
    def ResolveName(self, name: str) -> Definition | None:
       """
-      Look up *name* in this scope and then outward through parent scopes.
+      Look up *name* starting from this scope, walking outward.
 
-      Class scopes are transparent for LEGB lookup: Python does not make
-      class-body names visible inside methods defined in that class without
-      explicit qualification.  We skip class scopes when searching from a
-      child function scope.
+      Semantics
+      ---------
+      - If this function scope declares ``global name``, jump directly to the
+        module scope.
+      - If this function scope declares ``nonlocal name``, skip this scope and
+        search outward from the parent (skipping class scopes as usual).
+      - Class scopes are transparent when searching from a child function
+        scope (Python's LEGB rule).
       """
-      scope: Scope | None = self
-      came_from_function = False
-      while scope is not None:
-         # Skip class scope when searching outward from a function —
-         # matches Python's actual LEGB semantics.
-         if scope.Kind == ScopeKind.Class and came_from_function:
-            scope = scope.Parent
-            continue
-         if name in scope.Defs:
-            # Return the first (earliest) definition at this scope level.
-            return scope.Defs[name][0]
-         came_from_function = scope.Kind == ScopeKind.Function
-         scope = scope.Parent
+      return self._ResolveFrom(name, came_from_function=False)
+
+   def _ResolveFrom(
+      self, name: str, *, came_from_function: bool
+   ) -> Definition | None:
+      # Skip class scope when the search came from a nested function.
+      if self.Kind == ScopeKind.Class and came_from_function:
+         if self.Parent:
+            return self.Parent._ResolveFrom(
+               name, came_from_function=came_from_function
+            )
+         return None
+
+      if self.Kind == ScopeKind.Function:
+         # ``global name`` — redirect to module scope.
+         if name in self.GlobalNames:
+            return self._FindModuleScope()._LookupHere(name)
+         # ``nonlocal name`` — skip this scope entirely.
+         if name in self.NonlocalNames:
+            if self.Parent:
+               return self.Parent._ResolveFrom(name, came_from_function=True)
+            return None
+
+      # Look up in this scope first, then walk outward.
+      hit = self._LookupHere(name)
+      if hit is not None:
+         return hit
+      if self.Parent:
+         return self.Parent._ResolveFrom(
+            name, came_from_function=self.Kind == ScopeKind.Function
+         )
       return None
+
+   def _LookupHere(self, name: str) -> Definition | None:
+      defs = self.Defs.get(name)
+      return defs[0] if defs else None
+
+   def _FindModuleScope(self) -> Scope:
+      scope: Scope = self
+      while scope.Parent is not None:
+         scope = scope.Parent
+      return scope
 
    def ToDict(self, *, include_children: bool = True) -> dict:
       d: dict = {
-         "scope_id":  self.ScopeId,
-         "kind":      self.Kind.value,
-         "name":      self.Name,
-         "qual_name": self.QualName,
-         "line":      self.Line,
-         "parent_id": self.Parent.ScopeId if self.Parent else None,
-         "defs":      {
+         "scope_id":      self.ScopeId,
+         "kind":          self.Kind.value,
+         "name":          self.Name,
+         "qual_name":     self.QualName,
+         "line":          self.Line,
+         "parent_id":     self.Parent.ScopeId if self.Parent else None,
+         "global_names":  sorted(self.GlobalNames),
+         "nonlocal_names": sorted(self.NonlocalNames),
+         "defs": {
             n: [df.ToDict() for df in dfl]
             for n, dfl in self.Defs.items()
          },
-         "refs":      [r.ToDict() for r in self.Refs],
+         "refs": [r.ToDict() for r in self.Refs],
       }
       if include_children:
          d["children"] = [c.ScopeId for c in self.Children]
@@ -196,7 +251,7 @@ class Scope:
 
 
 # ---------------------------------------------------------------------------
-# ScopeTree  — container for the whole file
+# ScopeTree
 # ---------------------------------------------------------------------------
 
 @dataclass
@@ -204,12 +259,12 @@ class ScopeTree:
    """The complete scope tree for one file."""
 
    FilePath  : str
-   Root      : Scope          # the module scope
-   AllScopes : list[Scope]                       = field(default_factory=list)
+   Root      : Scope
+   AllScopes : list[Scope] = field(default_factory=list)
 
    def ToDict(self) -> dict:
       return {
-         "file":       self.FilePath,
-         "root_id":    self.Root.ScopeId,
-         "scopes":     [s.ToDict() for s in self.AllScopes],
+         "file":     self.FilePath,
+         "root_id":  self.Root.ScopeId,
+         "scopes":   [s.ToDict() for s in self.AllScopes],
       }

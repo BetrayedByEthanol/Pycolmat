@@ -15,14 +15,18 @@ Resolution targets (single-file only)
   ✓ imported names (resolved to the import definition, not the source file)
   ✓ class and function definitions at module level
   ✓ class and method definitions inside class bodies
+  ✓ global / nonlocal declarations — redirects lookup appropriately
+  ✓ class base expressions and metaclass keyword
+  ✓ decorator expressions (@deco, @deco(...))
+  ✓ type annotations (parameters, return, AnnAssign)
   ✗ self.X attribute access  (marked dynamic)
   ✗ dynamic calls via computed expressions
 
 Unresolved references
 ---------------------
 A reference is marked unresolved when no definition is found anywhere in
-the scope chain (including the module scope).  This typically means it
-refers to a builtin, a global injected at runtime, or a cross-file name.
+the scope chain.  This typically means it refers to a builtin, a global
+injected at runtime, or a cross-file name.
 """
 
 from __future__ import annotations
@@ -84,7 +88,7 @@ class ResolveResult:
 
 
 # ---------------------------------------------------------------------------
-# ResolveResultSet  — container for multi-file resolve run
+# ResolveResultSet
 # ---------------------------------------------------------------------------
 
 @dataclass
@@ -113,21 +117,20 @@ class _Resolver(ast.NodeVisitor):
 
    def __init__(self, file_path: str) -> None:
       self._FilePath = file_path
-      # The module scope is created immediately.
+
       self._ModuleScope = Scope(
          Kind     = ScopeKind.Module,
          Name     = "",
          QualName = "",
          Line     = 1,
          Parent   = None,
+         FilePath = file_path,
       )
-      self._AllScopes : list[Scope] = [self._ModuleScope]
-      self._ScopeStack: list[Scope] = [self._ModuleScope]
-      # Collected definitions and references (filled during visit).
-      self._AllDefs : list[Definition] = []
-      self._AllRefs : list[Reference]  = []
-      # Track call positions to avoid double-emitting name_read + call.
-      self._CallSites: set[tuple[int, int]] = set()
+      self._AllScopes  : list[Scope]      = [self._ModuleScope]
+      self._ScopeStack : list[Scope]      = [self._ModuleScope]
+      self._AllDefs    : list[Definition] = []
+      self._AllRefs    : list[Reference]  = []
+      self._CallSites  : set[tuple[int, int]] = set()
 
    # -----------------------------------------------------------------------
    # Scope helpers
@@ -137,10 +140,19 @@ class _Resolver(ast.NodeVisitor):
    def _Current(self) -> Scope:
       return self._ScopeStack[-1]
 
-   def _PushScope(self, kind: ScopeKind, name: str, line: int) -> Scope:
+   def _PushScope(
+      self, kind: ScopeKind, name: str, line: int
+   ) -> Scope:
       parent = self._Current
       qual = f"{parent.QualName}.{name}" if parent.QualName else name
-      scope = Scope(Kind=kind, Name=name, QualName=qual, Line=line, Parent=parent)
+      scope = Scope(
+         Kind     = kind,
+         Name     = name,
+         QualName = qual,
+         Line     = line,
+         Parent   = parent,
+         FilePath = self._FilePath,
+      )
       parent.AddChild(scope)
       self._AllScopes.append(scope)
       self._ScopeStack.append(scope)
@@ -179,13 +191,13 @@ class _Resolver(ast.NodeVisitor):
       extra: dict | None = None,
    ) -> Reference:
       ref = Reference(
-         Name     = name,
-         Kind     = kind,
-         Line     = line,
-         Col      = col,
-         ScopeRef = self._Current,
-         IsDynamic= dynamic,
-         Extra    = extra or {},
+         Name      = name,
+         Kind      = kind,
+         Line      = line,
+         Col       = col,
+         ScopeRef  = self._Current,
+         IsDynamic = dynamic,
+         Extra     = extra or {},
       )
       self._Current.Refs.append(ref)
       self._AllRefs.append(ref)
@@ -199,53 +211,84 @@ class _Resolver(ast.NodeVisitor):
       for alias in node.names:
          bound = alias.asname if alias.asname else alias.name.split(".")[0]
          extra = {"module": alias.name, "asname": alias.asname}
-         self._AddDef(bound, DefKind.Import, node.lineno, node.col_offset, extra)
-      self.generic_visit(node)
+         self._AddDef(
+            bound, DefKind.Import, node.lineno, node.col_offset, extra
+         )
 
    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
       module = node.module or ""
       for alias in node.names:
          bound = alias.asname if alias.asname else alias.name
          extra = {"module": module, "name": alias.name}
-         self._AddDef(bound, DefKind.ImportFrom, node.lineno, node.col_offset, extra)
-      self.generic_visit(node)
+         self._AddDef(
+            bound, DefKind.ImportFrom, node.lineno, node.col_offset, extra
+         )
 
    # -----------------------------------------------------------------------
-   # Module / class body declarations
+   # Global / nonlocal declarations
    # -----------------------------------------------------------------------
 
-   def _RecordDecl(self, node: ast.Assign | ast.AnnAssign) -> None:
-      """Record an Assign or AnnAssign as a definition in the current scope."""
-      if isinstance(node, ast.Assign):
-         for tgt in node.targets:
-            self._RecordTarget(tgt, DefKind.LocalWrite)
-         # Walk the RHS for references
-         self._WalkExprForRefs(node.value)
-      elif isinstance(node, ast.AnnAssign):
-         if isinstance(node.target, ast.Name):
-            kind = (
-               DefKind.ModuleDecl if self._Current.Kind == ScopeKind.Module
-               else DefKind.ClassDecl if self._Current.Kind == ScopeKind.Class
-               else DefKind.LocalWrite
+   def visit_Global(self, node: ast.Global) -> None:
+      """Record global declarations so resolution can redirect to module scope."""
+      for name in node.names:
+         self._Current.GlobalNames.add(name)
+
+   def visit_Nonlocal(self, node: ast.Nonlocal) -> None:
+      """Record nonlocal declarations so resolution skips the current scope."""
+      for name in node.names:
+         self._Current.NonlocalNames.add(name)
+
+   # -----------------------------------------------------------------------
+   # Annotations helper
+   # -----------------------------------------------------------------------
+
+   def _RecordAnnotation(self, ann: ast.expr | None) -> None:
+      """
+      Walk a type annotation expression and emit RefKind.Annotation references
+      for every Name node found.  Complex annotations like list[UserModel]
+      and Optional[UserModel] are walked recursively so all name components
+      are captured.
+      """
+      if ann is None:
+         return
+      for child in ast.walk(ann):
+         if isinstance(child, ast.Name) and isinstance(child.ctx, ast.Load):
+            self._AddRef(
+               child.id, RefKind.Annotation,
+               child.lineno, child.col_offset,
             )
-            self._AddDef(
-               node.target.id, kind,
-               node.target.lineno, node.target.col_offset,
-            )
-         if node.value is not None:
-            self._WalkExprForRefs(node.value)
+
+   # -----------------------------------------------------------------------
+   # Decorators helper
+   # -----------------------------------------------------------------------
+
+   def _RecordDecorators(
+      self, node: ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef
+   ) -> None:
+      """
+      Emit references for all decorators.  A bare decorator @deco produces a
+      Call reference; @deco(...) produces a Call for the outer call and the
+      inner expression is walked for further reads.
+      """
+      for dec in node.decorator_list:
+         self._WalkExprForRefs(dec)
+
+   # -----------------------------------------------------------------------
+   # Assignments
+   # -----------------------------------------------------------------------
 
    def visit_Assign(self, node: ast.Assign) -> None:
       cur = self._Current
       if cur.Kind in (ScopeKind.Module, ScopeKind.Class):
-         # Module / class body declaration
-         kind = DefKind.ModuleDecl if cur.Kind == ScopeKind.Module else DefKind.ClassDecl
+         kind = (
+            DefKind.ModuleDecl if cur.Kind == ScopeKind.Module
+            else DefKind.ClassDecl
+         )
          for tgt in node.targets:
             if isinstance(tgt, ast.Name):
                self._AddDef(tgt.id, kind, tgt.lineno, tgt.col_offset)
          self._WalkExprForRefs(node.value)
       else:
-         # Inside a function — local write
          for tgt in node.targets:
             self._RecordTarget(tgt, DefKind.LocalWrite)
          self._WalkExprForRefs(node.value)
@@ -253,7 +296,10 @@ class _Resolver(ast.NodeVisitor):
    def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
       cur = self._Current
       if cur.Kind in (ScopeKind.Module, ScopeKind.Class):
-         kind = DefKind.ModuleDecl if cur.Kind == ScopeKind.Module else DefKind.ClassDecl
+         kind = (
+            DefKind.ModuleDecl if cur.Kind == ScopeKind.Module
+            else DefKind.ClassDecl
+         )
          if isinstance(node.target, ast.Name):
             self._AddDef(
                node.target.id, kind,
@@ -262,9 +308,11 @@ class _Resolver(ast.NodeVisitor):
       else:
          if isinstance(node.target, ast.Name):
             self._AddDef(
-            node.target.id, DefKind.LocalWrite,
-            node.target.lineno, node.target.col_offset,
-         )
+               node.target.id, DefKind.LocalWrite,
+               node.target.lineno, node.target.col_offset,
+            )
+      # Always walk the annotation and the RHS value.
+      self._RecordAnnotation(node.annotation)
       if node.value is not None:
          self._WalkExprForRefs(node.value)
 
@@ -297,8 +345,7 @@ class _Resolver(ast.NodeVisitor):
    def visit_ExceptHandler(self, node: ast.ExceptHandler) -> None:
       if node.name:
          self._AddDef(
-            node.name, DefKind.LocalWrite,
-            node.lineno, node.col_offset,
+            node.name, DefKind.LocalWrite, node.lineno, node.col_offset
          )
       self.generic_visit(node)
 
@@ -306,14 +353,18 @@ class _Resolver(ast.NodeVisitor):
    # Functions / methods
    # -----------------------------------------------------------------------
 
-   def _VisitFuncDef(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
+   def _VisitFuncDef(
+      self, node: ast.FunctionDef | ast.AsyncFunctionDef
+   ) -> None:
       cur = self._Current
       is_method = cur.Kind == ScopeKind.Class
       kind = DefKind.MethodDef if is_method else DefKind.FunctionDef
       is_async = {"is_async": isinstance(node, ast.AsyncFunctionDef)}
       self._AddDef(node.name, kind, node.lineno, node.col_offset, is_async)
+      # Decorators are walked in the OUTER scope before pushing.
+      self._RecordDecorators(node)
       self._PushScope(ScopeKind.Function, node.name, node.lineno)
-      # Parameters
+      # Parameters (including annotations) — recorded inside the function scope.
       args = node.args
       all_args = (
          args.posonlyargs + args.args + args.kwonlyargs
@@ -327,7 +378,10 @@ class _Resolver(ast.NodeVisitor):
             arg.arg, DefKind.Parameter,
             arg.lineno, arg.col_offset, param_extra,
          )
-      # Body
+         self._RecordAnnotation(arg.annotation)
+      # Return annotation.
+      self._RecordAnnotation(node.returns)
+      # Body.
       for stmt in node.body:
          self.visit(stmt)
       self._PopScope()
@@ -343,22 +397,29 @@ class _Resolver(ast.NodeVisitor):
    # -----------------------------------------------------------------------
 
    def visit_ClassDef(self, node: ast.ClassDef) -> None:
-      cur = self._Current
-      _ = DefKind.MethodDef if cur.Kind == ScopeKind.Class else DefKind.ClassDef
-      # Record the class itself as a definition in the parent scope
       bases_extra = {"bases": [ast.unparse(b) for b in node.bases]}
-      self._AddDef(node.name, DefKind.ClassDef, node.lineno, node.col_offset, bases_extra)
+      self._AddDef(
+         node.name, DefKind.ClassDef, node.lineno, node.col_offset, bases_extra
+      )
+      # Decorators in the outer scope.
+      self._RecordDecorators(node)
+      # Base class expressions — emit references in the outer scope.
+      for base in node.bases:
+         self._WalkExprForRefs(base)
+      # Keyword arguments, e.g. metaclass=AllOptional.
+      for kw in node.keywords:
+         self._WalkExprForRefs(kw.value)
       self._PushScope(ScopeKind.Class, node.name, node.lineno)
       for stmt in node.body:
          self.visit(stmt)
       self._PopScope()
 
    # -----------------------------------------------------------------------
-   # Expression walkers — emit references
+   # Expression walkers
    # -----------------------------------------------------------------------
 
    def _WalkExprForRefs(self, node: ast.expr | None) -> None:
-      """Walk an expression subtree and emit references for all names/calls."""
+      """Walk an expression subtree and emit Read/Call/AttrCall references."""
       if node is None:
          return
       for child in ast.walk(node):
@@ -402,7 +463,7 @@ class _Resolver(ast.NodeVisitor):
             pass
 
    # -----------------------------------------------------------------------
-   # Statement fallback — walk children not handled above
+   # Statement fallbacks
    # -----------------------------------------------------------------------
 
    def visit_Return(self, node: ast.Return) -> None:
@@ -441,14 +502,12 @@ class _Resolver(ast.NodeVisitor):
 
    def Resolve(self) -> None:
       """
-      Second pass: for each reference, look up its name in the scope chain
-      and set ResolvedTo or IsUnresolved.
-
-      Attribute calls are marked dynamic and skipped (self.X is not resolved).
+      Second pass: resolve each non-dynamic reference using ResolveName.
+      global/nonlocal semantics are handled inside Scope.ResolveName.
       """
       for ref in self._AllRefs:
          if ref.IsDynamic:
-            continue  # already marked dynamic
+            continue
          defn = ref.ScopeRef.ResolveName(ref.Name)
          if defn is not None:
             ref.ResolvedTo = defn
@@ -456,7 +515,7 @@ class _Resolver(ast.NodeVisitor):
             ref.IsUnresolved = True
 
    # -----------------------------------------------------------------------
-   # Build result
+   # Build
    # -----------------------------------------------------------------------
 
    def Build(self) -> ResolveResult:
