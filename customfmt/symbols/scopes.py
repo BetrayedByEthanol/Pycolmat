@@ -91,6 +91,7 @@ class Definition:
 
 class RefKind(StrEnum):
    Read       = "read"
+   Write      = "write"
    Call       = "call"
    AttrCall   = "attribute_call"
    Annotation = "annotation"

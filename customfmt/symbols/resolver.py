@@ -204,6 +204,45 @@ class _Resolver(ast.NodeVisitor):
       return ref
 
    # -----------------------------------------------------------------------
+   # Write-target helpers
+   # -----------------------------------------------------------------------
+
+   def _IsGlobalOrNonlocal(self, name: str) -> bool:
+      """
+      Return True if *name* is declared global or nonlocal in the current
+      function scope.  Always False at module or class scope.
+      """
+      cur = self._Current
+      if cur.Kind != ScopeKind.Function:
+         return False
+      return name in cur.GlobalNames or name in cur.NonlocalNames
+
+   def _RecordWriteTarget(
+      self, target: ast.expr, normal_kind: DefKind
+   ) -> None:
+      """
+      Record an assignment target.
+
+      - If the name is declared global/nonlocal in the current function,
+        emit a RefKind.Write reference instead of a local definition.
+        This keeps the scope's Defs clean so reads shadow correctly.
+      - Otherwise delegate to _RecordTarget which emits a local definition.
+      """
+      match target:
+         case ast.Name(id=name, lineno=ln, col_offset=co):
+            if self._IsGlobalOrNonlocal(name):
+               self._AddRef(name, RefKind.Write, ln, co)
+            else:
+               self._AddDef(name, normal_kind, ln, co)
+         case ast.Tuple(elts=elts) | ast.List(elts=elts):
+            for elt in elts:
+               self._RecordWriteTarget(elt, normal_kind)
+         case ast.Starred(value=v):
+            self._RecordWriteTarget(v, normal_kind)
+         case _:
+            pass
+
+   # -----------------------------------------------------------------------
    # Imports
    # -----------------------------------------------------------------------
 
@@ -290,7 +329,7 @@ class _Resolver(ast.NodeVisitor):
          self._WalkExprForRefs(node.value)
       else:
          for tgt in node.targets:
-            self._RecordTarget(tgt, DefKind.LocalWrite)
+            self._RecordWriteTarget(tgt, DefKind.LocalWrite)
          self._WalkExprForRefs(node.value)
 
    def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
@@ -307,10 +346,14 @@ class _Resolver(ast.NodeVisitor):
             )
       else:
          if isinstance(node.target, ast.Name):
-            self._AddDef(
-               node.target.id, DefKind.LocalWrite,
-               node.target.lineno, node.target.col_offset,
-            )
+            tgt = node.target
+            if self._IsGlobalOrNonlocal(tgt.id):
+               self._AddRef(tgt.id, RefKind.Write, tgt.lineno, tgt.col_offset)
+            else:
+               self._AddDef(
+                     tgt.id, DefKind.LocalWrite,
+                     tgt.lineno, tgt.col_offset,
+               )
       # Always walk the annotation and the RHS value.
       self._RecordAnnotation(node.annotation)
       if node.value is not None:
@@ -318,10 +361,7 @@ class _Resolver(ast.NodeVisitor):
 
    def visit_AugAssign(self, node: ast.AugAssign) -> None:
       if isinstance(node.target, ast.Name):
-         self._AddDef(
-            node.target.id, DefKind.LocalWrite,
-            node.target.lineno, node.target.col_offset,
-         )
+         self._RecordWriteTarget(node.target, DefKind.LocalWrite)
       self._WalkExprForRefs(node.value)
 
    # -----------------------------------------------------------------------
@@ -329,7 +369,7 @@ class _Resolver(ast.NodeVisitor):
    # -----------------------------------------------------------------------
 
    def visit_For(self, node: ast.For) -> None:
-      self._RecordTarget(node.target, DefKind.LocalWrite)
+      self._RecordWriteTarget(node.target, DefKind.LocalWrite)
       self._WalkExprForRefs(node.iter)
       for stmt in node.body + node.orelse:
          self.visit(stmt)
@@ -338,7 +378,7 @@ class _Resolver(ast.NodeVisitor):
       for item in node.items:
          self._WalkExprForRefs(item.context_expr)
          if item.optional_vars is not None:
-            self._RecordTarget(item.optional_vars, DefKind.LocalWrite)
+            self._RecordWriteTarget(item.optional_vars, DefKind.LocalWrite)
       for stmt in node.body:
          self.visit(stmt)
 
@@ -508,6 +548,8 @@ class _Resolver(ast.NodeVisitor):
       for ref in self._AllRefs:
          if ref.IsDynamic:
             continue
+         # Write refs (global/nonlocal assignments) are resolved
+         # the same way as reads — through the scope chain.
          defn = ref.ScopeRef.ResolveName(ref.Name)
          if defn is not None:
             ref.ResolvedTo = defn

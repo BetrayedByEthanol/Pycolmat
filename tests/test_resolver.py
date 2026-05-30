@@ -16,6 +16,16 @@ TestGlobalNonlocal
    TestNonlocalWriteRecordedInNonlocalScope
    TestGlobalUnresolvedWhenNotAtModuleLevel
 
+TestGlobalNonlocalWrites
+   TestGlobalAssignNoLocalDef
+   TestGlobalWriteRefResolvesToModuleCounter
+   TestGlobalReadRefResolvesToModuleCounter
+   TestNonlocalAssignNoLocalDef
+   TestNonlocalWriteRefResolvesToOuterTotal
+   TestNonlocalReadRefResolvesToOuterTotal
+   TestNormalLocalAssignStillCreatesLocalWrite
+   TestWriteRefKindInToDict
+
 TestClassBases
    TestBaseClassReferenceRecorded
    TestBaseClassResolvesWhenImported
@@ -121,6 +131,13 @@ def UnresolvedRefs(result, name: str):
    return [
       r for r in result.References
       if r.Name == name and r.IsUnresolved
+   ]
+
+
+def WriteRefs(result, name: str):
+   return [
+      r for r in result.References
+      if r.Name == name and r.Kind == RefKind.Write
    ]
 
 
@@ -301,6 +318,153 @@ class TestGlobalNonlocal:
       result = ResolveFile(f)
       unresolved = UnresolvedRefs(result, "missing_var")
       assert unresolved
+
+
+# ---------------------------------------------------------------------------
+# TestGlobalNonlocalWrites
+# ---------------------------------------------------------------------------
+
+
+class TestGlobalNonlocalWrites:
+   def TestGlobalAssignNoLocalDef(self, tmp_path):
+      """global Counter; Counter = ... must NOT create a LocalWrite in Increment."""
+      src = Src("""\
+         Counter = 0
+         def Increment():
+            global Counter
+            Counter = Counter + 1
+      """)
+      f = Write(tmp_path / "f.py", src)
+      result = ResolveFile(f)
+      fn_scope = next(
+         s for s in result.Tree.AllScopes if s.Name == "Increment"
+      )
+      # Counter must NOT appear as a LocalWrite definition inside Increment
+      local_counter = [
+         d for d in result.Definitions
+         if d.Name == "Counter" and d.Kind == DefKind.LocalWrite
+         and d.ScopeRef is fn_scope
+      ]
+      assert not local_counter, "global Counter must not create LocalWrite in Increment"
+
+   def TestGlobalWriteRefResolvesToModuleCounter(self, tmp_path):
+      """Write reference for global Counter resolves to module-level Counter."""
+      src = Src("""\
+         Counter = 0
+         def Increment():
+            global Counter
+            Counter = Counter + 1
+      """)
+      f = Write(tmp_path / "f.py", src)
+      result = ResolveFile(f)
+      write_refs = WriteRefs(result, "Counter")
+      assert write_refs, "expected a write reference for Counter"
+      assert write_refs[0].ResolvedTo is not None
+      assert write_refs[0].ResolvedTo.Kind == DefKind.ModuleDecl
+      assert write_refs[0].ResolvedTo.ScopeRef.Kind == ScopeKind.Module
+
+   def TestGlobalReadRefResolvesToModuleCounter(self, tmp_path):
+      """Read reference for global Counter (RHS) resolves to module Counter."""
+      src = Src("""\
+         Counter = 0
+         def Increment():
+            global Counter
+            Counter = Counter + 1
+      """)
+      f = Write(tmp_path / "f.py", src)
+      result = ResolveFile(f)
+      reads = [
+         r for r in ResolvedRefs(result, "Counter")
+         if r.ScopeRef.Kind == ScopeKind.Function
+      ]
+      assert reads
+      assert reads[0].ResolvedTo.Kind == DefKind.ModuleDecl
+
+   def TestNonlocalAssignNoLocalDef(self, tmp_path):
+      """nonlocal Total; Total = ... must NOT create a LocalWrite in Inner."""
+      src = Src("""\
+         def Outer():
+            total = 0
+            def Inner():
+               nonlocal total
+               total = total + 1
+      """)
+      f = Write(tmp_path / "f.py", src)
+      result = ResolveFile(f)
+      inner_scope = next(
+         s for s in result.Tree.AllScopes if s.Name == "Inner"
+      )
+      local_total = [
+         d for d in result.Definitions
+         if d.Name == "total" and d.Kind == DefKind.LocalWrite
+         and d.ScopeRef is inner_scope
+      ]
+      assert not local_total, "nonlocal total must not create LocalWrite in Inner"
+
+   def TestNonlocalWriteRefResolvesToOuterTotal(self, tmp_path):
+      """Write reference for nonlocal Total resolves to Outer.Total."""
+      src = Src("""\
+         def Outer():
+            total = 0
+            def Inner():
+               nonlocal total
+               total = total + 1
+      """)
+      f = Write(tmp_path / "f.py", src)
+      result = ResolveFile(f)
+      write_refs = WriteRefs(result, "total")
+      assert write_refs, "expected a write reference for total"
+      assert write_refs[0].ResolvedTo is not None
+      assert write_refs[0].ResolvedTo.ScopeRef.Name == "Outer"
+
+   def TestNonlocalReadRefResolvesToOuterTotal(self, tmp_path):
+      """Read reference for nonlocal Total (RHS) resolves to Outer.Total."""
+      src = Src("""\
+         def Outer():
+            total = 0
+            def Inner():
+               nonlocal total
+               total = total + 1
+      """)
+      f = Write(tmp_path / "f.py", src)
+      result = ResolveFile(f)
+      inner_reads = [
+         r for r in ResolvedRefs(result, "total")
+         if r.ScopeRef.Name == "Inner"
+      ]
+      assert inner_reads
+      assert inner_reads[0].ResolvedTo.ScopeRef.Name == "Outer"
+
+   def TestNormalLocalAssignStillCreatesLocalWrite(self, tmp_path):
+      """A plain assignment (no global/nonlocal) must still create a LocalWrite."""
+      src = Src("""\
+         def Foo():
+            result = 1
+            return result
+      """)
+      f = Write(tmp_path / "f.py", src)
+      result = ResolveFile(f)
+      fn_scope = next(s for s in result.Tree.AllScopes if s.Name == "Foo")
+      local_result = [
+         d for d in result.Definitions
+         if d.Name == "result" and d.Kind == DefKind.LocalWrite
+         and d.ScopeRef is fn_scope
+      ]
+      assert local_result, "normal local assignment must create LocalWrite"
+
+   def TestWriteRefKindInToDict(self, tmp_path):
+      """RefKind.Write must serialize as 'write' in JSON output."""
+      src = Src("""\
+         Counter = 0
+         def Increment():
+            global Counter
+            Counter = Counter + 1
+      """)
+      f = Write(tmp_path / "f.py", src)
+      result = ResolveFile(f)
+      ref_dicts = [r.ToDict() for r in WriteRefs(result, "Counter")]
+      assert ref_dicts
+      assert ref_dicts[0]["kind"] == "write"
 
 
 # ---------------------------------------------------------------------------

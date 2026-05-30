@@ -14,6 +14,7 @@ Aliases (console_scripts)
   try-auto-format  →  customfmt fix
   check-format     →  customfmt check
   create-index     →  customfmt index
+  resolve-index    →  customfmt resolve
 
 Exit codes
 ----------
