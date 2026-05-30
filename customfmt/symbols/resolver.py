@@ -217,23 +217,34 @@ class _Resolver(ast.NodeVisitor):
          return False
       return name in cur.GlobalNames or name in cur.NonlocalNames
 
+   def _RecordWriteName(
+      self, name: str, line: int, col: int, normal_kind: DefKind
+   ) -> None:
+      """
+      Record a single name as a write target.
+
+      - If *name* is declared global/nonlocal in the current function scope,
+        emit a RefKind.Write reference (no local definition is created).
+      - Otherwise emit a local definition with *normal_kind*.
+
+      This is the single point of truth used by _RecordWriteTarget,
+      visit_AnnAssign, visit_AugAssign, and visit_ExceptHandler.
+      """
+      if self._IsGlobalOrNonlocal(name):
+         self._AddRef(name, RefKind.Write, line, col)
+      else:
+         self._AddDef(name, normal_kind, line, col)
+
    def _RecordWriteTarget(
       self, target: ast.expr, normal_kind: DefKind
    ) -> None:
       """
-      Record an assignment target.
-
-      - If the name is declared global/nonlocal in the current function,
-        emit a RefKind.Write reference instead of a local definition.
-        This keeps the scope's Defs clean so reads shadow correctly.
-      - Otherwise delegate to _RecordTarget which emits a local definition.
+      Record a (potentially composite) assignment target, routing each
+      leaf Name node through _RecordWriteName for global/nonlocal awareness.
       """
       match target:
          case ast.Name(id=name, lineno=ln, col_offset=co):
-            if self._IsGlobalOrNonlocal(name):
-               self._AddRef(name, RefKind.Write, ln, co)
-            else:
-               self._AddDef(name, normal_kind, ln, co)
+            self._RecordWriteName(name, ln, co, normal_kind)
          case ast.Tuple(elts=elts) | ast.List(elts=elts):
             for elt in elts:
                self._RecordWriteTarget(elt, normal_kind)
@@ -347,12 +358,8 @@ class _Resolver(ast.NodeVisitor):
       else:
          if isinstance(node.target, ast.Name):
             tgt = node.target
-            if self._IsGlobalOrNonlocal(tgt.id):
-               self._AddRef(tgt.id, RefKind.Write, tgt.lineno, tgt.col_offset)
-            else:
-               self._AddDef(
-                     tgt.id, DefKind.LocalWrite,
-                     tgt.lineno, tgt.col_offset,
+            self._RecordWriteName(
+               tgt.id, tgt.lineno, tgt.col_offset, DefKind.LocalWrite
                )
       # Always walk the annotation and the RHS value.
       self._RecordAnnotation(node.annotation)
@@ -360,7 +367,22 @@ class _Resolver(ast.NodeVisitor):
          self._WalkExprForRefs(node.value)
 
    def visit_AugAssign(self, node: ast.AugAssign) -> None:
+      # Augmented assignment (x += ...) is both a read and a write of the target.
+      # For ast.Name targets we emit:
+      #   1. A RefKind.Read  — the implicit read of the current value.
+      #   2. A write via _RecordWriteName — global/nonlocal-aware write handling.
+      # For complex targets (subscript, attribute) we keep conservative behaviour
+      # and just walk for refs without emitting a read.
       if isinstance(node.target, ast.Name):
+         name = node.target.id
+         ln   = node.target.lineno
+         co   = node.target.col_offset
+         # Emit the implicit read before the write.
+         if (ln, co) not in self._CallSites:
+            self._AddRef(name, RefKind.Read, ln, co)
+         # Emit the write (respects global/nonlocal).
+         self._RecordWriteName(name, ln, co, DefKind.LocalWrite)
+      else:
          self._RecordWriteTarget(node.target, DefKind.LocalWrite)
       self._WalkExprForRefs(node.value)
 
@@ -384,8 +406,10 @@ class _Resolver(ast.NodeVisitor):
 
    def visit_ExceptHandler(self, node: ast.ExceptHandler) -> None:
       if node.name:
-         self._AddDef(
-            node.name, DefKind.LocalWrite, node.lineno, node.col_offset
+         # Use _RecordWriteName so global/nonlocal-declared names get a Write
+         # reference instead of a spurious LocalWrite definition.
+         self._RecordWriteName(
+            node.name, node.lineno, node.col_offset, DefKind.LocalWrite
          )
       self.generic_visit(node)
 

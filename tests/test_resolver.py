@@ -1,6 +1,10 @@
 """
 Tests for customfmt.symbols.resolver (hardened version).
 
+New in this version:
+  TestExceptAlias — except-as with global/nonlocal
+  TestAugAssignReadWrite — augmented assignment read+write
+
 TestScopeIds
    TestDeterministicScopeIds
    TestScopeIdsStableAcrossRuns
@@ -910,6 +914,168 @@ class TestResolverExisting:
          if r.IsDynamic and r.Name == "Method"
       ]
       assert dynamic
+
+
+# ---------------------------------------------------------------------------
+# TestExceptAlias — except-as target global/nonlocal awareness
+# ---------------------------------------------------------------------------
+
+
+class TestExceptAlias:
+   def TestExceptAliasNormalLocal(self, tmp_path):
+      """Normal except-as target must create a LocalWrite in the function scope."""
+      src = Src("""         def Foo():
+            try:
+               pass
+            except Exception as err:
+               return err
+      """)
+      f = Write(tmp_path / "f.py", src)
+      result = ResolveFile(f)
+      fn_scope = next(s for s in result.Tree.AllScopes if s.Name == "Foo")
+      local_err = [
+         d for d in result.Definitions
+         if d.Name == "err" and d.Kind == DefKind.LocalWrite
+         and d.ScopeRef is fn_scope
+      ]
+      assert local_err, "err must be a LocalWrite in Foo"
+      read_err = [
+         r for r in ResolvedRefs(result, "err")
+         if r.ScopeRef is fn_scope
+      ]
+      assert read_err
+      assert read_err[0].ResolvedTo.Kind == DefKind.LocalWrite
+
+   def TestExceptAliasGlobal(self, tmp_path):
+      """global err; except ... as err: must emit Write ref, not LocalWrite."""
+      src = Src("""         err = None
+         def Foo():
+            global err
+            try:
+               pass
+            except Exception as err:
+               return err
+      """)
+      f = Write(tmp_path / "f.py", src)
+      result = ResolveFile(f)
+      fn_scope = next(s for s in result.Tree.AllScopes if s.Name == "Foo")
+      # No LocalWrite for err inside Foo
+      local_err = [
+         d for d in result.Definitions
+         if d.Name == "err" and d.Kind == DefKind.LocalWrite
+         and d.ScopeRef is fn_scope
+      ]
+      assert not local_err, "global err must not create LocalWrite inside Foo"
+      # Write ref resolves to module err
+      write_err = WriteRefs(result, "err")
+      assert write_err
+      assert write_err[0].ResolvedTo is not None
+      assert write_err[0].ResolvedTo.Kind == DefKind.ModuleDecl
+      # Read ref (return err) resolves to module err
+      read_err = [
+         r for r in ResolvedRefs(result, "err")
+         if r.ScopeRef is fn_scope and r.Kind == RefKind.Read
+      ]
+      assert read_err
+      assert read_err[0].ResolvedTo.Kind == DefKind.ModuleDecl
+
+   def TestExceptAliasNonlocal(self, tmp_path):
+      """nonlocal err; except ... as err: must emit Write ref, not LocalWrite."""
+      src = Src("""         def Outer():
+            err = None
+            def Inner():
+               nonlocal err
+               try:
+                  pass
+               except Exception as err:
+                  return err
+      """)
+      f = Write(tmp_path / "f.py", src)
+      result = ResolveFile(f)
+      inner_scope = next(s for s in result.Tree.AllScopes if s.Name == "Inner")
+      # No LocalWrite for err inside Inner
+      local_err = [
+         d for d in result.Definitions
+         if d.Name == "err" and d.Kind == DefKind.LocalWrite
+         and d.ScopeRef is inner_scope
+      ]
+      assert not local_err, "nonlocal err must not create LocalWrite inside Inner"
+      # Write ref resolves to Outer's err
+      write_err = WriteRefs(result, "err")
+      assert write_err
+      assert write_err[0].ResolvedTo.ScopeRef.Name == "Outer"
+      # Read ref resolves to Outer's err
+      read_err = [
+         r for r in ResolvedRefs(result, "err")
+         if r.ScopeRef is inner_scope and r.Kind == RefKind.Read
+      ]
+      assert read_err
+      assert read_err[0].ResolvedTo.ScopeRef.Name == "Outer"
+
+
+# ---------------------------------------------------------------------------
+# TestAugAssignReadWrite — augmented assignment models read + write
+# ---------------------------------------------------------------------------
+
+
+class TestAugAssignReadWrite:
+   def TestAugAssignGlobalReadAndWrite(self, tmp_path):
+      """Counter += 1 with global Counter: Read and Write refs, no LocalWrite."""
+      src = Src("""         Counter = 0
+         def Increment():
+            global Counter
+            Counter += 1
+      """)
+      f = Write(tmp_path / "f.py", src)
+      result = ResolveFile(f)
+      fn_scope = next(s for s in result.Tree.AllScopes if s.Name == "Increment")
+      # No LocalWrite for Counter inside Increment
+      local_counter = [
+         d for d in result.Definitions
+         if d.Name == "Counter" and d.Kind == DefKind.LocalWrite
+         and d.ScopeRef is fn_scope
+      ]
+      assert not local_counter, "global Counter must not create LocalWrite"
+      # Write ref resolves to module Counter
+      write_refs = [
+         r for r in WriteRefs(result, "Counter")
+         if r.ScopeRef is fn_scope
+      ]
+      assert write_refs
+      assert write_refs[0].ResolvedTo is not None
+      assert write_refs[0].ResolvedTo.Kind == DefKind.ModuleDecl
+      # Read ref resolves to module Counter
+      read_refs = [
+         r for r in ResolvedRefs(result, "Counter")
+         if r.ScopeRef is fn_scope and r.Kind == RefKind.Read
+      ]
+      assert read_refs
+      assert read_refs[0].ResolvedTo.Kind == DefKind.ModuleDecl
+
+   def TestAugAssignLocalReadAndWrite(self, tmp_path):
+      """Local Counter += 1: LocalWrite definition, read resolves to it."""
+      src = Src("""         def Increment():
+            Counter = 0
+            Counter += 1
+      """)
+      f = Write(tmp_path / "f.py", src)
+      result = ResolveFile(f)
+      fn_scope = next(s for s in result.Tree.AllScopes if s.Name == "Increment")
+      # LocalWrite Counter exists
+      local_counter = [
+         d for d in result.Definitions
+         if d.Name == "Counter" and d.Kind == DefKind.LocalWrite
+         and d.ScopeRef is fn_scope
+      ]
+      assert local_counter, "normal local assignment must create LocalWrite"
+      # Read ref from the augmented assignment resolves to local Counter
+      read_refs = [
+         r for r in ResolvedRefs(result, "Counter")
+         if r.ScopeRef is fn_scope and r.Kind == RefKind.Read
+      ]
+      assert read_refs
+      assert read_refs[0].ResolvedTo.Kind == DefKind.LocalWrite
+      assert read_refs[0].ResolvedTo.ScopeRef is fn_scope
 
 
 # ---------------------------------------------------------------------------

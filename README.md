@@ -4,7 +4,7 @@ A small, project-specific Python formatting and style-checking tool.
 Works **alongside** Ruff and Pyright — it does not replace them.
 
 - `customfmt fix` – applies safe auto-formatting in place  
-- `customfmt check` – checks project-specific naming and style rules (CF001–CF012)
+- `customfmt check` – checks project-specific naming and style rules (CF001–CF019)
 
 ---
 
@@ -18,13 +18,15 @@ pip install .
 pip install -e .
 ```
 
-Three console scripts are installed:
+Five console scripts are installed:
 
 | Script            | Equivalent              |
-|-------------------|-------------------------|
+|-------------------|-----------------------------|
 | `customfmt`       | main entry point        |
 | `try-auto-format` | alias for `customfmt fix`   |
 | `check-format`    | alias for `customfmt check` |
+| `create-index`    | alias for `customfmt index` |
+| `resolve-index`   | alias for `customfmt resolve` |
 
 **Requirements:** Python ≥ 3.11, no third-party dependencies.
 
@@ -116,6 +118,50 @@ src/user_model.py:4:7 RENAME local variable 'TotalCount' -> 'total_count'
 
 Nested functions and classes are not renamed in v1; each top-level
 function scope is handled independently.
+
+
+---
+
+### `customfmt index` — build a symbol index
+
+```bash
+# Index all .py files under src/
+customfmt index src/
+
+# Pretty-print JSON
+customfmt index --pretty src/
+
+# Write to a file
+customfmt index --output index.json src/
+```
+
+`create-index` is an alias for `customfmt index`.
+
+Output is always JSON with a `files` array and an `errors` array.  Each
+file entry contains a `symbols` list with `kind`, `name`, `qualified_name`,
+`file`, `line`, `col`, `scope`, and `extra` fields.
+
+---
+
+### `customfmt resolve` — build a resolved symbol graph
+
+```bash
+# Resolve all .py files under src/
+customfmt resolve src/
+
+# Pretty-print JSON
+customfmt resolve --pretty src/
+
+# Write to a file
+customfmt resolve --output resolve.json src/
+```
+
+`resolve-index` is an alias for `customfmt resolve`.
+
+Output is JSON with a `files` array and an `errors` array.  Each file entry
+contains `scopes`, `definitions`, `references`, and a `summary`.  References
+include a `resolved_to` field when the name was resolved within the file, and
+an `unresolved` flag when no definition was found.
 
 
 ---
