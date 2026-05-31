@@ -58,7 +58,8 @@ Auto-fix rules applied (in order):
 1. Convert CRLF / CR line endings to LF  
 2. Remove trailing whitespace  
 3. Align contiguous `self.X = value` blocks  
-4. Ensure exactly one final newline  
+4. Align class-body declaration blocks  
+5. Ensure exactly one final newline  
 
 ### `customfmt check` — check style rules
 
@@ -170,12 +171,13 @@ an `unresolved` flag when no definition was found.
 
 ### Auto-fix rules (applied by `customfmt fix`)
 
-| Rule                   | Description                                                   |
-|------------------------|---------------------------------------------------------------|
-| CF018 (trailing-whitespace) | Remove trailing spaces/tabs on every line              |
-| self-alignment         | Align contiguous `self.X = value` blocks (same indent)        |
-| CF019 (final-newline)  | Ensure exactly one newline at end of file                     |
-| CF011 (line-endings)   | Convert CRLF and bare CR line endings to LF                   |
+| Code  | Rule                     | Description                                              |
+|-------|--------------------------|----------------------------------------------------------|
+| CF011 | line-endings             | Convert CRLF / CR line endings to LF                     |
+| CF018 | trailing-whitespace      | Remove trailing spaces/tabs on every line                |
+| CF009 | self-assignment-align    | Align contiguous `self.X = value` blocks                 |
+| CF013 | class-body-align         | Align class-body declaration blocks                      |
+| CF019 | final-newline            | Ensure exactly one newline at end of file                |
 
 ### Check-only rules (reported by `customfmt check`)
 

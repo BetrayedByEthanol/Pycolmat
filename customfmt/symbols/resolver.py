@@ -357,9 +357,11 @@ class _Resolver(ast.NodeVisitor):
             )
       else:
          if isinstance(node.target, ast.Name):
-            tgt = node.target
             self._RecordWriteName(
-               tgt.id, tgt.lineno, tgt.col_offset, DefKind.LocalWrite
+               node.target.id,
+               node.target.lineno,
+               node.target.col_offset,
+               DefKind.LocalWrite,
                )
       # Always walk the annotation and the RHS value.
       self._RecordAnnotation(node.annotation)
