@@ -38,7 +38,7 @@ from customfmt.discovery import CollectFiles
 from customfmt.formatter import ProcessFile
 from customfmt.indexer import IndexPaths
 from customfmt.io import WriteUtf8Lf
-from customfmt.renamer import AnalyseFile
+from customfmt.rename_plan import PlanFile
 from customfmt.symbols.resolver import ResolveFile, ResolveResultSet
 from customfmt.types import Violation
 
@@ -158,6 +158,12 @@ def _BuildParser(prog: str = "customfmt") -> argparse.ArgumentParser:
       help="Apply renames in place; exit 0.",
    )
    ren_p.add_argument("--quiet", "-q", action="store_true", help="Suppress per-rename output.")
+   ren_p.add_argument(
+      "--json",
+      action="store_true",
+      dest="json_out",
+      help="Output the rename plan as JSON.",
+   )
 
    # -- index ----------------------------------------------------------------
    idx_p = sub.add_parser(
@@ -315,6 +321,10 @@ def _CmdCheck(args: argparse.Namespace) -> int:
 
 
 def _CmdRename(args: argparse.Namespace) -> int:
+   import json as _json
+
+   from customfmt.symbols.model import FileError
+
    try:
       files = CollectFiles(args.paths)
    except FileNotFoundError as exc:
@@ -325,34 +335,38 @@ def _CmdRename(args: argparse.Namespace) -> int:
       print("customfmt: no Python files found.", file=sys.stderr)
       return 2
 
-   quiet: bool = args.quiet
+   quiet: bool   = args.quiet
+   json_out: bool = getattr(args, "json_out", False)
    any_candidate = False
+   all_plans     = []
 
    for path in files:
-      try:
-         result = AnalyseFile(path)
-      except SyntaxError as exc:
-         print(f"customfmt: syntax error in {path}: {exc}", file=sys.stderr)
-         continue
-      except (OSError, UnicodeDecodeError, ValueError) as exc:
-         print(f"customfmt: error: {path}: {exc}", file=sys.stderr)
+      plan = PlanFile(path)
+      if isinstance(plan, FileError):
+         print(f"customfmt: error: {path}: {plan.Error}", file=sys.stderr)
          return 2
 
-      if not result.candidates:
+      if not plan.Items:
          continue
 
       any_candidate = True
+      all_plans.append(plan)
 
-      if args.diff:
-         print(result.UnifiedDiff(), end="")
-      elif not quiet:
-         for v in result.Violations():
-            print(v)
+      if not json_out:
+         if args.diff:
+            print(plan.UnifiedDiff(path), end="")
+         elif not quiet:
+            for v in plan.Violations(path):
+               print(v)
 
       if args.apply:
-         WriteUtf8Lf(path, result.rewritten)
-         if not quiet:
+         plan.Apply(path)
+         if not quiet and not json_out:
             print(f"renamed {path}")
+
+   if json_out:
+      payload = [p.ToDict() for p in all_plans]
+      print(_json.dumps(payload, indent=2))
 
    if args.check:
       return 1 if any_candidate else 0
