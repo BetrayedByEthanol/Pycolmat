@@ -37,6 +37,7 @@ If changing resolver, indexer, or rename-planner behavior, also inspect JSON out
 create-index customfmt/ --pretty
 resolve-index customfmt/ --pretty
 customfmt rename --check customfmt/ --json
+customfmt refs customfmt/ --name ResolveFile --pretty
 ```
 
 ---
@@ -190,10 +191,12 @@ pytest
 | `indexer.py`          | raw AST symbol indexing            |
 | `symbols/resolver.py` | per-file lexical symbol resolution |
 | `rename_plan.py`      | safe rename planning               |
+| `symbols/project_graph.py` | read-only project reference discovery |
 | `cli.py`              | command wiring only                |
 
 Do not mix rewrite logic into the resolver.
 Do not mix project-wide rename logic into the local rename planner.
+Do not put project-wide rename implementation in `symbols/project_graph.py`; it is read-only reference discovery only.
 Do not make `try-auto-format` perform semantic refactors.
 
 ---
@@ -277,6 +280,34 @@ It must not:
 * rename anything directly
 
 Attribute calls should remain dynamic unless a later explicit project-wide resolver safely proves their target.
+
+---
+
+## Project reference discovery rules
+
+`customfmt refs` is read-only. It may build a project-level graph and resolve
+supported imports between files, but it must not rewrite files or implement
+project-wide rename.
+
+Allowed import resolution for v1:
+
+* `from package.module import Name`
+* `from package.module import Name as Alias`
+* `import package.module as alias`
+* `import package.module`
+
+Relative imports may be marked unresolved. Dynamic references must be skipped
+or marked dynamic rather than guessed, including `self.X`, `obj.Method()`,
+`getattr()`, `globals()`, `importlib`, and string references.
+
+Each JSON reference result must clearly report one confidence value:
+
+* `local_resolved`
+* `import_resolved`
+* `unresolved`
+* `dynamic`
+
+Do not connect `customfmt refs` to the rename planner yet.
 
 ---
 
