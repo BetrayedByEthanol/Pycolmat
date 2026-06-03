@@ -25,9 +25,10 @@ Function scope is skipped entirely if:
   - it calls bare locals(), globals(), vars(), eval(), or exec()
 
 Individual rename is skipped if:
-  - proposed snake_case name collides with any existing local, parameter,
-    import, or builtin name visible in the function scope
+  - proposed snake_case name collides with any visible local, parameter,
+    import, parent/module declaration, or builtin name
   - two different bad names map to the same snake_case target
+  - another rename wants to patch the same token to a different name
 
 Nested functions are handled independently; each function scope is
 processed without crossing into child or parent scopes.
@@ -95,26 +96,46 @@ class SourcePos:
 class RenameItem:
    """One safe rename candidate inside a function scope."""
 
-   OldName   : str
-   NewName   : str
-   ScopeQual : str              # dotted qualified name of the function scope
-   Sites     : list[SourcePos]  # all token positions to rewrite (sorted)
-   DefLine   : int              # line of the first definition site
+   OldName         : str
+   NewName         : str
+   ScopeQual       : str              # dotted qualified name of the function scope
+   DefinitionSites : list[SourcePos]  # local definition token positions
+   ReadSites       : list[SourcePos]  # resolved read token positions
+   WriteSites      : list[SourcePos]  # local/resolved write token positions
+   DefLine         : int              # line of the first definition site
+
+   @property
+   def AllSites(self) -> list[SourcePos]:
+      """All token positions to rewrite, de-duplicated and sorted."""
+      return sorted({
+         *self.DefinitionSites,
+         *self.ReadSites,
+         *self.WriteSites,
+      })
+
+   @property
+   def Sites(self) -> list[SourcePos]:
+      """Backward-compatible alias for all token positions to rewrite."""
+      return self.AllSites
 
    def ToDict(self) -> dict:
       return {
-         "old_name":   self.OldName,
-         "new_name":   self.NewName,
-         "scope":      self.ScopeQual,
-         "def_line":   self.DefLine,
-         "sites":      [s.ToDict() for s in self.Sites],
+         "old_name":         self.OldName,
+         "new_name":         self.NewName,
+         "scope":            self.ScopeQual,
+         "def_line":         self.DefLine,
+         "sites":            [s.ToDict() for s in self.AllSites],
+         "definition_sites": [s.ToDict() for s in self.DefinitionSites],
+         "read_sites":       [s.ToDict() for s in self.ReadSites],
+         "write_sites":      [s.ToDict() for s in self.WriteSites],
+         "all_sites":        [s.ToDict() for s in self.AllSites],
       }
 
    def AsViolation(self, path: Path) -> Violation:
       return Violation(
          path,
          self.DefLine,
-         self.Sites[0].Col + 1 if self.Sites else 1,
+         self.AllSites[0].Col + 1 if self.AllSites else 1,
          "RENAME",
          f"local variable {self.OldName!r} -> {self.NewName!r}",
       )
@@ -206,9 +227,29 @@ def _HasUnsafeBareCall(scope: Scope) -> bool:
    return False
 
 
-def _NamesInScope(scope: Scope) -> set[str]:
-   """All names defined in *scope* (any kind)."""
-   return set(scope.Defs.keys())
+def _HasVisibleCollision(scope: Scope, name: str) -> bool:
+   """Return True if *name* already resolves from *scope* or is a builtin."""
+   if name in _BUILTIN_NAMES:
+      return True
+   return scope.ResolveName(name) is not None
+
+
+def _FindNameToken(
+   pos_map: dict[tuple[str, int, int], bool],
+   name: str,
+   line: int,
+   fallback_col: int,
+) -> tuple[int, int]:
+   """Find the real NAME token for AST sites with imprecise columns."""
+   if (name, line, fallback_col) in pos_map:
+      return (line, fallback_col)
+   candidates = [
+      (ln, co) for token_name, ln, co in pos_map
+      if token_name == name and ln == line
+   ]
+   if candidates:
+      return min(candidates)
+   return (line, fallback_col)
 
 
 # ---------------------------------------------------------------------------
@@ -218,6 +259,7 @@ def _NamesInScope(scope: Scope) -> set[str]:
 def _AnalyseScope(
    scope: Scope,
    resolve: ResolveResult,
+   pos_map: dict[tuple[str, int, int], bool],
 ) -> tuple[list[RenameItem], list[RenameSkip]]:
    """
    Analyse one function scope and return (items, skips).
@@ -253,7 +295,10 @@ def _AnalyseScope(
       new_name = _ToSnake(name)
       if new_name == name:
          continue
-      bad_defs[name] = [(d.Line, d.Col) for d in local_defs]
+      bad_defs[name] = [
+         _FindNameToken(pos_map, name, d.Line, d.Col)
+         for d in local_defs
+      ]
 
    if not bad_defs:
       return items, skips
@@ -265,9 +310,6 @@ def _AnalyseScope(
       new_name_counts[new] = new_name_counts.get(new, 0) + 1
    colliding_new = {n for n, c in new_name_counts.items() if c > 1}
 
-   # All names currently visible in this scope (for collision detection)
-   visible: set[str] = _NamesInScope(scope) | _BUILTIN_NAMES
-
    for old_name, def_sites in bad_defs.items():
       new_name = proposed[old_name]
 
@@ -277,8 +319,7 @@ def _AnalyseScope(
          ))
          continue
 
-      forbidden = visible - {old_name}
-      if new_name in forbidden:
+      if _HasVisibleCollision(scope, new_name):
          skips.append(RenameSkip(
             qual,
             f"proposed name {new_name!r} collides with existing name",
@@ -293,11 +334,9 @@ def _AnalyseScope(
          for d in scope.Defs[old_name]
          if d.Kind == DefKind.LocalWrite
       }
-      ref_sites: set[tuple[int, int]] = set()
-
-      # Definition sites
-      for line, col in def_sites:
-         ref_sites.add((line, col))
+      definition_sites: set[tuple[int, int]] = set(def_sites)
+      read_sites      : set[tuple[int, int]] = set()
+      write_sites     : set[tuple[int, int]] = set(def_sites)
 
       # Reference sites (read and write refs resolved to this local)
       for ref in resolve.References:
@@ -309,26 +348,60 @@ def _AnalyseScope(
             continue
          if id(ref.ResolvedTo) not in local_def_set:
             continue
-         if ref.Kind in (RefKind.Read, RefKind.Write):
-            ref_sites.add((ref.Line, ref.Col))
+         if ref.Kind == RefKind.Read:
+            read_sites.add((ref.Line, ref.Col))
+         elif ref.Kind == RefKind.Write:
+            write_sites.add((ref.Line, ref.Col))
 
-      sorted_sites = sorted(SourcePos(ln, co) for ln, co in ref_sites)
+      sorted_def_sites = sorted(SourcePos(ln, co) for ln, co in definition_sites)
+      sorted_read_sites = sorted(SourcePos(ln, co) for ln, co in read_sites)
+      sorted_write_sites = sorted(SourcePos(ln, co) for ln, co in write_sites)
       first_def = min(line for line, _ in def_sites)
       items.append(
          RenameItem(
-            OldName   = old_name,
-            NewName   = new_name,
-            ScopeQual = qual,
-            Sites     = sorted_sites,
-            DefLine   = first_def,
+            OldName         = old_name,
+            NewName         = new_name,
+            ScopeQual       = qual,
+            DefinitionSites = sorted_def_sites,
+            ReadSites       = sorted_read_sites,
+            WriteSites      = sorted_write_sites,
+            DefLine         = first_def,
          )
       )
 
    return items, skips
 
 
+def _FilterDuplicatePatchSites(
+   items: list[RenameItem],
+) -> tuple[list[RenameItem], list[RenameSkip]]:
+   """Skip items that would patch one token position to different names."""
+   names_by_site: dict[tuple[int, int], dict[str, list[RenameItem]]] = {}
+   for item in items:
+      for site in item.AllSites:
+         by_name = names_by_site.setdefault((site.Line, site.Col), {})
+         by_name.setdefault(item.NewName, []).append(item)
+
+   blocked: set[int] = set()
+   skips: list[RenameSkip] = []
+   for (line, col), by_name in names_by_site.items():
+      if len(by_name) <= 1:
+         continue
+      reason = (
+         f"duplicate patch site at line {line}, col {col} "
+         "has conflicting target names"
+      )
+      for same_name_items in by_name.values():
+         for item in same_name_items:
+            blocked.add(id(item))
+            skips.append(RenameSkip(item.ScopeQual, reason, item.OldName))
+
+   if not blocked:
+      return items, skips
+   return [item for item in items if id(item) not in blocked], skips
+
 # ---------------------------------------------------------------------------
-# Token rewriter  (identical logic to the old renamer.py)
+# Token rewriter
 # ---------------------------------------------------------------------------
 
 def _BuildTokenPosMap(
@@ -417,17 +490,22 @@ def PlanFile(path: Path) -> RenamePlan | FileError:
    all_items  : list[RenameItem] = []
    all_skips  : list[RenameSkip] = []
    patch_map  : dict[tuple[int, int], str] = {}
+   pos_map = _BuildTokenPosMap(source)
 
    # Analyse every function/method scope independently
    for scope in resolve.Tree.AllScopes:
       if scope.Kind != ScopeKind.Function:
          continue
-      items, skips = _AnalyseScope(scope, resolve)
+      items, skips = _AnalyseScope(scope, resolve, pos_map)
       all_items.extend(items)
       all_skips.extend(skips)
-      for item in items:
-         for site in item.Sites:
-            patch_map[(site.Line, site.Col)] = item.NewName
+
+   all_items, duplicate_skips = _FilterDuplicatePatchSites(all_items)
+   all_skips.extend(duplicate_skips)
+
+   for item in all_items:
+      for site in item.AllSites:
+         patch_map[(site.Line, site.Col)] = item.NewName
 
    rewritten = _RewriteTokens(source, patch_map)
 

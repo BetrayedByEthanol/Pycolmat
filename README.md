@@ -111,14 +111,20 @@ src/user_model.py:4:7 RENAME local variable 'TotalCount' -> 'total_count'
 
 **Safety rules** — a function is skipped entirely if it:
 
-- contains a `global` or `nonlocal` declaration,
-- calls `locals()`, `globals()`, `vars()`, `eval()`, or `exec()`,
-- would produce a name collision with an existing local, parameter,
-  imported name, or Python builtin, or
-- has two bad names that map to the same `snake_case` target.
+- contains a `global` or `nonlocal` declaration, or
+- calls `locals()`, `globals()`, `vars()`, `eval()`, or `exec()`.
 
-Nested functions and classes are not renamed in v1; each top-level
-function scope is handled independently.
+An individual rename is skipped if it would:
+
+- produce a name collision with a visible local, parameter, import,
+  parent/module declaration, or Python builtin,
+- collide with another bad name that maps to the same `snake_case` target, or
+- patch the same token position as another rename to a different target name.
+
+Nested functions and classes are planned independently without crossing
+scope boundaries. In JSON output, each item keeps the backward-compatible
+`sites` list and also reports `definition_sites`, `read_sites`,
+`write_sites`, and `all_sites`; the plan also includes `skipped` entries.
 
 
 ---

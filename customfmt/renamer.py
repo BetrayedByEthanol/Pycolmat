@@ -1,5 +1,8 @@
 """
-Safe local-variable renamer for customfmt.
+Deprecated safe local-variable renamer for customfmt.
+
+rename_plan.py is the authoritative implementation for current rename
+planning.  This module is retained only for legacy imports/tests.
 
 Implements ``customfmt rename``:
   --check   report candidates, exit 1 if any

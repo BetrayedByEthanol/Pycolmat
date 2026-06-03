@@ -74,6 +74,8 @@ from customfmt.rename_plan import (
    PlanFile,
    RenameItem,
    RenameSkip,
+   SourcePos,
+   _FilterDuplicatePatchSites,
    _ToSnake,
 )
 
@@ -209,6 +211,8 @@ class TestPlanFileItems:
       plan = PlanFile(f)
       items = GetItems(plan)
       assert any(i.OldName == "ItemName" for i in items)
+      assert "item_name" in plan.Rewritten
+      assert "ItemName" not in plan.Rewritten
 
    def TestWithAsTargetRename(self, tmp_path):
       src = Src("""\
@@ -220,6 +224,8 @@ class TestPlanFileItems:
       plan = PlanFile(f)
       items = GetItems(plan)
       assert any(i.OldName == "FileHandle" for i in items)
+      assert "file_handle" in plan.Rewritten
+      assert "FileHandle" not in plan.Rewritten
 
    def TestExceptAsTargetRename(self, tmp_path):
       src = Src("""\
@@ -233,6 +239,8 @@ class TestPlanFileItems:
       plan = PlanFile(f)
       items = GetItems(plan)
       assert any(i.OldName == "MyError" for i in items)
+      assert "my_error" in plan.Rewritten
+      assert "MyError" not in plan.Rewritten
 
    def TestAlreadySnakeCaseUnchanged(self, tmp_path):
       src = Src("""\
@@ -383,13 +391,54 @@ class TestPlanFileSafety:
    def TestCollisionWithImportSkipped(self, tmp_path):
       src = Src("""\
          def Foo():
+            from somewhere import total_count
+            TotalCount = 1
+            return TotalCount + total_count
+      """)
+      f = Write(tmp_path / "f.py", src)
+      plan = PlanFile(f)
+      assert GetItems(plan) == []
+      skips = GetSkips(plan)
+      assert any("TotalCount" in s.Name for s in skips)
+
+   def TestParentModuleCollisionSkipped(self, tmp_path):
+      src = Src("""\
+         total_count = 0
+
+         def Foo():
+            TotalCount = 1
+            return TotalCount + total_count
+      """)
+      f = Write(tmp_path / "f.py", src)
+      plan = PlanFile(f)
+      assert GetItems(plan) == []
+      skips = GetSkips(plan)
+      assert any("TotalCount" in s.Name for s in skips)
+
+   def TestParentFunctionCollisionSkipped(self, tmp_path):
+      src = Src("""\
+         def Outer():
+            total_count = 0
+            def Inner():
+               TotalCount = 1
+               return TotalCount + total_count
+            return Inner()
+      """)
+      f = Write(tmp_path / "f.py", src)
+      plan = PlanFile(f)
+      assert GetItems(plan) == []
+      skips = GetSkips(plan)
+      assert any("TotalCount" in s.Name for s in skips)
+
+   def TestSafeImportNameDoesNotBlockDifferentTarget(self, tmp_path):
+      src = Src("""\
+         def Foo():
             import os
             OsPath = os.path
             return OsPath
       """)
       f = Write(tmp_path / "f.py", src)
       plan = PlanFile(f)
-      # os_path doesn't collide with anything — rename is safe
       items = GetItems(plan)
       assert any(i.OldName == "OsPath" for i in items)
 
@@ -487,7 +536,52 @@ class TestRenamePlanModel:
       assert "scope" in d
       assert "def_line" in d
       assert "sites" in d
+      assert "definition_sites" in d
+      assert "read_sites" in d
+      assert "write_sites" in d
+      assert "all_sites" in d
+      assert d["sites"] == d["all_sites"]
       assert isinstance(d["sites"], list)
+      assert items[0].Sites == items[0].AllSites
+
+   def TestRenameItemSiteBuckets(self, tmp_path):
+      f = Write(tmp_path / "f.py", Src("""\
+         def Foo():
+            TotalCount = 0
+            TotalCount += 1
+            return TotalCount
+      """))
+      plan = PlanFile(f)
+      item = GetItems(plan)[0]
+      assert item.DefinitionSites
+      assert item.ReadSites
+      assert item.WriteSites
+      assert item.AllSites == item.Sites
+
+   def TestDuplicatePatchSiteCollisionSkipped(self):
+      pos = SourcePos(3, 6)
+      first = RenameItem(
+         OldName         = "FirstName",
+         NewName         = "first_name",
+         ScopeQual       = "Foo",
+         DefinitionSites = [pos],
+         ReadSites       = [],
+         WriteSites      = [pos],
+         DefLine         = 3,
+      )
+      second = RenameItem(
+         OldName         = "SecondName",
+         NewName         = "second_name",
+         ScopeQual       = "Foo",
+         DefinitionSites = [pos],
+         ReadSites       = [],
+         WriteSites      = [pos],
+         DefLine         = 3,
+      )
+      items, skips = _FilterDuplicatePatchSites([first, second])
+      assert items == []
+      assert len(skips) == 2
+      assert all("duplicate patch site" in s.Reason for s in skips)
 
    def TestRenameSkipToDict(self):
       skip = RenameSkip("Foo", "collision", "TotalCount")
@@ -509,6 +603,15 @@ class TestRenamePlanModel:
       assert "skipped" in d
       assert "changed" in d
       assert d["changed"] is True
+
+      skipped_file = Write(tmp_path / "skipped.py", Src("""\
+         def Bar(total_count):
+            TotalCount = 0
+            return TotalCount + total_count
+      """))
+      skipped_plan = PlanFile(skipped_file).ToDict()
+      assert skipped_plan["items"] == []
+      assert skipped_plan["skipped"]
 
    def TestChangedProperty(self, tmp_path):
       clean = Write(tmp_path / "clean.py", "def Foo():\n   x = 1\n")
@@ -642,6 +745,8 @@ class TestCLIRename:
       data = json.loads(out)
       assert isinstance(data, list)
       assert data[0]["items"][0]["old_name"] == "TotalCount"
+      assert "definition_sites" in data[0]["items"][0]
+      assert "skipped" in data[0]
 
    def TestJsonOutputApply(self, tmp_path, capsys):
       f = Write(tmp_path / "f.py", Src("""\
