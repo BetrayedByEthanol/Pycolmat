@@ -350,6 +350,14 @@ When changing resolver behavior, add tests for:
 * nested scopes
 * global/nonlocal behavior
 
+When changing project-level reference discovery, add or update coverage in
+`tests/test_project_refs.py` for:
+
+* same-file lookups by `--name` and `--symbol`
+* supported import resolution
+* unresolved and dynamic references
+* JSON output flags and CLI errors
+
 When changing rename planner behavior, add tests for:
 
 * generated plan items
