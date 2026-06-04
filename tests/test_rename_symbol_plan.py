@@ -9,6 +9,7 @@ from io import StringIO
 from pathlib import Path
 
 from customfmt.cli import Main
+from customfmt.rename_symbol_plan import RenameSymbolEdit, RenameSymbolPlan
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -270,3 +271,148 @@ class TestRenameSymbolPlan:
 
       assert rc == 0
       assert f.read_text(encoding="utf-8") == original
+
+
+class TestRenameSymbolDiff:
+   def RunDiff(self, paths, *args: str) -> tuple[int, str, str]:
+      out = StringIO()
+      err = StringIO()
+      with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+         rc = Main(["rename-symbol", str(paths), *args, "--diff"])
+      return rc, out.getvalue(), err.getvalue()
+
+   def TestDiffOutputsUnifiedDiffAndDoesNotModifyFiles(self, tmp_path):
+      original = "class UserModel:\n   pass\n\ndef Build():\n   return UserModel()\n"
+      f = Write(tmp_path / "main.py", original)
+
+      rc, out, err = self.RunDiff(f, "--name", "UserModel", "--to", "AccountModel")
+
+      assert rc == 0
+      assert err == ""
+      assert f"--- a/{f}" in out
+      assert f"+++ b/{f}" in out
+      assert "-class UserModel:" in out
+      assert "+class AccountModel:" in out
+      assert "-   return UserModel()" in out
+      assert "+   return AccountModel()" in out
+      assert f.read_text(encoding="utf-8") == original
+
+   def TestClassRenameDiffIncludesDefinitionAndConstructorCall(self, tmp_path):
+      f = Write(
+         tmp_path / "main.py",
+         Src(
+            """
+            class UserModel:
+               pass
+
+            def Build():
+               return UserModel()
+            """
+         ),
+      )
+
+      rc, out, _ = self.RunDiff(f, "--name", "UserModel", "--to", "AccountModel")
+
+      assert rc == 0
+      assert "+class AccountModel:" in out
+      assert "+   return AccountModel()" in out
+
+   def TestFunctionRenameDiffAcrossFiles(self, tmp_path):
+      pkg = Package(tmp_path)
+      Write(pkg / "utils.py", "def BuildValue():\n   return 1\n")
+      Write(
+         pkg / "main.py",
+         Src(
+            """
+            from pkg.utils import BuildValue
+
+            def Run():
+               return BuildValue()
+            """
+         ),
+      )
+
+      rc, out, _ = self.RunDiff(pkg, "--name", "BuildValue", "--to", "MakeValue")
+
+      assert rc == 0
+      assert "def MakeValue():" in out
+      assert "from pkg.utils import MakeValue" in out
+      assert "return MakeValue()" in out
+
+   def TestImportFromBindingDiff(self, tmp_path):
+      pkg = Package(tmp_path)
+      Write(pkg / "models.py", "class UserModel:\n   pass\n")
+      Write(pkg / "main.py", "from pkg.models import UserModel\n")
+
+      rc, out, _ = self.RunDiff(pkg, "--name", "UserModel", "--to", "AccountModel")
+
+      assert rc == 0
+      assert "-from pkg.models import UserModel" in out
+      assert "+from pkg.models import AccountModel" in out
+
+   def TestModuleAttributeDiffEditsOnlyAttributeToken(self, tmp_path):
+      pkg = Package(tmp_path)
+      Write(pkg / "utils.py", "def BuildValue():\n   return 1\n")
+      Write(
+         pkg / "main.py",
+         Src(
+            """
+            import pkg.utils
+
+            def Run():
+               return pkg.utils.BuildValue()
+            """
+         ),
+      )
+
+      rc, out, _ = self.RunDiff(pkg, "--name", "BuildValue", "--to", "MakeValue")
+
+      assert rc == 0
+      assert "pkg.utils.MakeValue()" in out
+      assert "import pkg.utils" in out
+      assert "pkg.MakeValue" not in out
+
+   def TestAnnotationsDiff(self, tmp_path):
+      f = Write(
+         tmp_path / "main.py",
+         Src(
+            """
+            class UserModel:
+               pass
+
+            def Build(user: UserModel) -> UserModel:
+               return user
+            """
+         ),
+      )
+
+      rc, out, _ = self.RunDiff(f, "--name", "UserModel", "--to", "AccountModel")
+
+      assert rc == 0
+      assert "user: AccountModel" in out
+      assert "-> AccountModel" in out
+
+   def TestTokenMismatchProducesExitTwo(self, tmp_path, monkeypatch):
+      f = Write(tmp_path / "main.py", "class UserModel:\n   pass\n")
+      plan = RenameSymbolPlan(Query={}, Target=None, NewName="AccountModel")
+      plan.Edits.append(
+         RenameSymbolEdit(str(f), 1, 6, "OtherModel", "AccountModel", "definition:class")
+      )
+      monkeypatch.setattr("customfmt.cli.PlanRenameSymbol", lambda *args, **kwargs: (plan, []))
+
+      rc, out, err = self.RunDiff(f, "--name", "UserModel", "--to", "AccountModel")
+
+      assert rc == 2
+      assert out == ""
+      assert "expected 'OtherModel'" in err
+
+   def TestNoEditsProducesEmptyDiffAndExitZero(self, tmp_path, monkeypatch):
+      f = Write(tmp_path / "main.py", "class UserModel:\n   pass\n")
+      plan = RenameSymbolPlan(Query={}, Target=None, NewName="AccountModel")
+      monkeypatch.setattr("customfmt.cli.PlanRenameSymbol", lambda *args, **kwargs: (plan, []))
+
+      rc, out, err = self.RunDiff(f, "--name", "UserModel", "--to", "AccountModel")
+
+      assert rc == 0
+      assert out == ""
+      assert err == ""

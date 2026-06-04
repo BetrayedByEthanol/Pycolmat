@@ -308,15 +308,17 @@ Each JSON reference result must clearly report one confidence value:
 * `dynamic`
 
 `customfmt rename-symbol` may consume `customfmt refs` results to build a
-read-only JSON rename plan. It must not connect to the local `customfmt rename`
-applier, and it must not apply edits or emit diffs.
+read-only JSON rename plan and may render that plan as a read-only unified diff.
+It must not connect to the local `customfmt rename` applier, apply edits, or
+write source files.
 
 ## Project-wide rename-symbol planning rules
 
 `customfmt rename-symbol` is read-only. It may consume `customfmt refs` project
-reference results and emit JSON token edit plans, but it must not write source
-files, produce diffs, or apply edits. Keep implementation separate from the
-resolver and from `symbols/project_graph.py`; the project graph remains
+reference results and emit JSON token edit plans or render unified diffs from
+those plans, but it must not write source files or apply edits. Keep
+implementation separate from the resolver and from `symbols/project_graph.py`;
+the project graph remains
 read-only reference discovery.
 
 Supported v1 targets are class definitions, function definitions, module-level
