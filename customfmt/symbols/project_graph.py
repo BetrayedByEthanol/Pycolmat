@@ -231,6 +231,10 @@ class ProjectGraph:
       target_locs: set[_SymbolLocation] = set()
       if selected_def is not None:
          target_locs.add(self._DefLocation(selected_def))
+         if selected_def.Kind in (DefKind.Import, DefKind.ImportFrom):
+            import_target = self._ResolveImportDefinition(selected_def)
+            if import_target.Target is not None:
+               target_locs.add(self._DefLocation(import_target.Target))
       elif selected_ref is not None:
          selected_project_ref = self._ProjectReference(selected_ref)
          self._AppendReference(output, selected_project_ref)
@@ -333,9 +337,20 @@ class ProjectGraph:
    ) -> None:
       for defn in self._AllDefinitions():
          if self._DefLocation(defn) in target_locs:
-            project_def = self._ProjectDefinition(defn)
+            project_def = self._ProjectDefinitionForOutput(defn)
             if not _HasDefinition(output.Definitions, project_def):
                output.Definitions.append(project_def)
+
+   def _ProjectDefinitionForOutput(self, defn: Definition) -> ProjectDefinition:
+      project_def = self._ProjectDefinition(defn)
+      if defn.Kind in (DefKind.Import, DefKind.ImportFrom):
+         import_target = self._ResolveImportDefinition(defn)
+         project_def.Confidence = import_target.Confidence
+         project_def.Extra = {
+            **project_def.Extra,
+            "import_target": self._ImportTargetDict(import_target),
+         }
+      return project_def
 
    # -----------------------------------------------------------------------
    # Import resolution
@@ -347,8 +362,12 @@ class ProjectGraph:
       if not isinstance(full, str) or "." not in full:
          return None
       base_name = full.split(".", 1)[0]
+      prefix = full.rsplit(".", 1)[0]
       defn = ref.ScopeRef.ResolveName(base_name)
       if defn is None or defn.Kind != DefKind.Import:
+         return None
+      module = str(defn.Extra.get("module", ""))
+      if prefix not in (defn.Name, module):
          return None
       import_target = self._ResolveImportDefinition(defn)
       if import_target.Confidence != CONF_IMPORT_RESOLVED:

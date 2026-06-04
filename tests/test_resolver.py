@@ -86,7 +86,7 @@ import textwrap
 from pathlib import Path
 
 from customfmt.cli import Main, MainResolve
-from customfmt.symbols.resolver import ResolveFile
+from customfmt.symbols.resolver import ResolveFile, ResolveResult
 from customfmt.symbols.scopes import DefKind, RefKind, ScopeKind
 
 # ---------------------------------------------------------------------------
@@ -1139,3 +1139,19 @@ class TestCLI:
       assert len(data["files"]) == 1
       assert len(data["errors"]) == 1
       assert data["errors"][0]["file"].endswith("bad.py")
+
+   def TestImportFromDefinitionMetadataIncludesAliasAndLevel(self, tmp_path):
+      f = Write(
+         tmp_path / "f.py",
+         Src("from .models import UserModel as Model\n"),
+      )
+
+      result = ResolveFile(f)
+      assert isinstance(result, ResolveResult)
+      import_defs = [d for d in result.Definitions if d.Kind == DefKind.ImportFrom]
+
+      assert import_defs
+      assert import_defs[0].Extra["module"] == "models"
+      assert import_defs[0].Extra["name"] == "UserModel"
+      assert import_defs[0].Extra["asname"] == "Model"
+      assert import_defs[0].Extra["level"] == 1

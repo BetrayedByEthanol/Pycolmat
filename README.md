@@ -200,10 +200,13 @@ files when the target module is present in the scanned paths:
 - `import package.module as alias`
 - `import package.module`
 
-Relative imports may remain unresolved in this v1 foundation. Dynamic
-references are explicitly skipped rather than guessed: `self.X`,
-`obj.Method()`, `getattr()`, `globals()`, `importlib`, and string references
-are not resolved as project references.
+Relative imports are reported as unresolved in this v1 foundation with
+`relative_import_unresolved` as the reason. Imported module attribute calls such
+as `module.Foo()` may be reported as `import_resolved` when `module` is a
+supported local import and `Foo` is found in the imported module. Arbitrary
+attribute and dynamic patterns remain dynamic or unresolved rather than guessed:
+`obj.Method()`, `self.X`, `getattr()`, `globals()`, `importlib`, and string
+references are not resolved as project references.
 
 Output is always JSON with `definitions`, `references`,
 `unresolved_references`, `dynamic_references`, `errors`, and `summary`. Every

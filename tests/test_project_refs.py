@@ -243,3 +243,166 @@ class TestProjectRefs:
 
       assert data["query"]["symbol"] == symbol
       assert RefNames(data) == ["Build"]
+
+   def TestSameFileSymbolReferenceLookup(self, tmp_path):
+      f = Write(
+         tmp_path / "main.py",
+         Src(
+            """
+            def Build():
+               return 1
+
+            def Run():
+               return Build()
+            """
+         ),
+      )
+      symbol = f"{f}:6:10"
+
+      result, _ = FindRefsBySymbol([str(f)], symbol)
+      data = result.ToDict()
+
+      assert data["query"]["symbol"] == symbol
+      assert data["definitions"][0]["name"] == "Build"
+      assert data["references"][0]["resolved_to"]["name"] == "Build"
+
+   def TestImportFromClassAliasResolvesToTargetClass(self, tmp_path):
+      pkg = Package(tmp_path)
+      models = Write(pkg / "models.py", "class UserModel:\n   pass\n")
+      Write(
+         pkg / "main.py",
+         Src(
+            """
+            from pkg.models import UserModel as Model
+
+            def Build():
+               return Model()
+            """
+         ),
+      )
+
+      result, _ = FindRefsByName([str(pkg)], "UserModel")
+      data = result.ToDict()
+      refs = [r for r in data["references"] if r["name"] == "Model"]
+
+      assert any(d["file"] == str(models) for d in data["definitions"])
+      assert refs
+      assert refs[0]["confidence"] == "import_resolved"
+      assert refs[0]["resolved_to"]["name"] == "UserModel"
+      assert refs[0]["resolved_to"]["file"] == str(models)
+
+   def TestImportModuleAttributeRefs(self, tmp_path):
+      pkg = Package(tmp_path)
+      utils = Write(pkg / "utils.py", "def BuildValue():\n   return 1\n")
+      Write(
+         pkg / "main.py",
+         Src(
+            """
+            import pkg.utils
+
+            def Run():
+               return pkg.utils.BuildValue()
+            """
+         ),
+      )
+
+      result, _ = FindRefsByName([str(pkg)], "BuildValue")
+      data = result.ToDict()
+      refs = [r for r in data["references"] if r["name"] == "BuildValue"]
+
+      assert refs
+      assert refs[0]["confidence"] == "import_resolved"
+      assert refs[0]["resolved_to"]["file"] == str(utils)
+
+   def TestImportModuleAttributeDoesNotGuessWrongPrefix(self, tmp_path):
+      pkg = Package(tmp_path)
+      Write(pkg / "utils.py", "def BuildValue():\n   return 1\n")
+      Write(
+         pkg / "main.py",
+         Src(
+            """
+            import pkg.utils
+
+            def Run(pkg):
+               return pkg.BuildValue()
+            """
+         ),
+      )
+
+      result, _ = FindRefsByName([str(pkg)], "BuildValue")
+      data = result.ToDict()
+
+      assert data["dynamic_references"][0]["confidence"] == "dynamic"
+      assert data["dynamic_references"][0]["extra"]["full"] == "pkg.BuildValue"
+
+   def TestSymbolLookupOnImportFromIncludesTargetDefinition(self, tmp_path):
+      pkg = Package(tmp_path)
+      models = Write(pkg / "models.py", "class UserModel:\n   pass\n")
+      main = Write(
+         pkg / "main.py",
+         Src(
+            """
+            from pkg.models import UserModel
+
+            def Build():
+               return UserModel()
+            """
+         ),
+      )
+      symbol = f"{main}:2:0"
+
+      result, _ = FindRefsBySymbol([str(pkg)], symbol)
+      data = result.ToDict()
+      definition_files = {d["file"] for d in data["definitions"]}
+
+      assert str(main) in definition_files
+      assert str(models) in definition_files
+      assert any(r["resolved_to"]["file"] == str(models) for r in data["references"])
+
+   def TestRelativeImportMarkedUnresolved(self, tmp_path):
+      pkg = Package(tmp_path)
+      Write(pkg / "models.py", "class UserModel:\n   pass\n")
+      Write(
+         pkg / "main.py",
+         Src(
+            """
+            from .models import UserModel
+
+            def Build():
+               return UserModel()
+            """
+         ),
+      )
+
+      result, _ = FindRefsByName([str(pkg)], "UserModel")
+      data = result.ToDict()
+      refs = [r for r in data["references"] if r["name"] == "UserModel"]
+
+      assert refs[0]["confidence"] == "unresolved"
+      assert refs[0]["extra"]["import_target"]["reason"] == "relative_import_unresolved"
+
+   def TestPrettyOutputIsIndentedJson(self, tmp_path, capsys):
+      f = Write(tmp_path / "main.py", "def Build():\n   return 1\n")
+
+      rc = Main(["refs", str(f), "--name", "Build", "--pretty"])
+      out = capsys.readouterr().out
+
+      assert rc == 0
+      assert '\n  "query": {' in out
+      assert json.loads(out)["query"]["name"] == "Build"
+
+   def TestInvalidSymbolReturnsExitTwo(self, tmp_path, capsys):
+      f = Write(tmp_path / "main.py", "def Build():\n   return 1\n")
+
+      rc = Main(["refs", str(f), "--symbol", "not-a-symbol"])
+      err = capsys.readouterr().err
+
+      assert rc == 2
+      assert "symbol must use PATH:LINE:COL" in err
+
+   def TestNoPythonFilesReturnsExitTwo(self, tmp_path, capsys):
+      rc = Main(["refs", str(tmp_path), "--name", "Build"])
+      err = capsys.readouterr().err
+
+      assert rc == 2
+      assert "no Python files found" in err
