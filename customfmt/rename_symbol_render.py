@@ -1,4 +1,4 @@
-"""Read-only renderers for project-wide rename-symbol plans."""
+"""Renderers for project-wide rename-symbol plans."""
 
 from __future__ import annotations
 
@@ -31,6 +31,15 @@ def RenderPlanDiff(plan: RenameSymbolPlan) -> str:
          )
       )
    return "".join(chunks)
+
+
+def RenderPlanTextByFile(plan: RenameSymbolPlan) -> dict[Path, str]:
+   """Return rewritten text for every affected file after validating all edits."""
+   rendered: dict[Path, str] = {}
+   for file_path in sorted({edit.FilePath for edit in plan.Edits}):
+      path = Path(file_path)
+      rendered[path] = RenderPlanTextForFile(plan, path)
+   return rendered
 
 
 def RenderPlanTextForFile(plan: RenameSymbolPlan, path: Path) -> str:

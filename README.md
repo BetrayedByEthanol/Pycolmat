@@ -6,7 +6,7 @@ Works **alongside** Ruff and Pyright — it does not replace them.
 - `customfmt fix` – applies safe auto-formatting in place  
 - `customfmt check` – checks project-specific naming and style rules (CF001–CF019)
 - `customfmt refs` – discovers read-only project references as JSON
-- `customfmt rename-symbol` – emits a read-only project-wide rename plan as JSON or unified diff
+- `customfmt rename-symbol` – emits a project-wide rename plan as JSON, renders a diff, or applies guarded token edits
 
 ---
 
@@ -222,7 +222,7 @@ reported definition or reference includes a `confidence` value:
 
 ---
 
-### `customfmt rename-symbol` — plan a read-only project-wide symbol rename
+### `customfmt rename-symbol` — plan or apply a guarded project-wide symbol rename
 
 ```bash
 # Plan a rename from an exact definition/reference location
@@ -236,18 +236,28 @@ customfmt rename-symbol src/ --name BuildValue --to MakeValue --output rename-pl
 
 # Render a read-only unified diff instead of JSON
 customfmt rename-symbol src/ --name UserModel --to AccountModel --diff
+
+# Apply guarded token edits after validating every affected file
+customfmt rename-symbol src/ --name UserModel --to AccountModel --apply
 ```
 
 `customfmt rename-symbol` emits JSON by default, pretty JSON with `--pretty`,
-writes JSON with `--output PATH`, and renders a read-only unified diff with
-`--diff`. When `--diff` is used, JSON is not printed and source files are not
-modified. Diff mode is read-only, so it renders proposed token edits to stdout
-without applying them to source files. `--diff` cannot be combined with
-`--output`; that incompatible option pair exits with code 2 before writing any
-output file. `--pretty` only affects JSON output and is ignored in diff mode.
-The command uses `customfmt refs` project reference results as its source of
-truth, then reports or renders exact token edit sites that a future applier
-could use. If `--name` matches
+writes JSON with `--output PATH`, renders a read-only unified diff with
+`--diff`, and applies guarded token edits with `--apply`. When `--diff` is
+used, JSON is not printed and source files are not modified. Diff mode is
+read-only, so it renders proposed token edits to stdout without applying them
+to source files. `--apply` reuses the same token renderer and validation path
+as diff mode: every affected file is rendered first, every planned edit must
+target an existing `NAME` token whose text matches the recorded `old` value,
+and no source file is written if validation fails for any affected file. Apply
+mode writes files with UTF-8 LF normalization and prints `renamed <path>` for
+each written file; if the plan has no edits, it prints nothing and exits 0.
+`--apply` cannot be combined with `--diff`, `--output`, or `--pretty`. `--diff`
+cannot be combined with `--output`; that incompatible option pair exits with
+code 2 before writing any output file. `--pretty` only affects JSON output and
+is ignored in diff mode. The command uses `customfmt refs` project reference
+results as its source of truth, then reports, renders, or applies exact token
+edit sites. If `--name` matches
 multiple supported definitions, the command returns an ambiguity error and
 requires `--symbol PATH:LINE:COL`.
 
