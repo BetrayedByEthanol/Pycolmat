@@ -9,6 +9,7 @@ Commands
   customfmt index   [--pretty] [--output PATH] <paths...>
   customfmt resolve [--pretty] [--output PATH] <paths...>
   customfmt refs [--name NAME | --symbol PATH:LINE:COL] [--pretty] [--output PATH] <paths...>
+  customfmt rename-symbol [--name NAME | --symbol PATH:LINE:COL] --to NAME [--pretty] [--output PATH] <paths...>
 
 Aliases (console_scripts)
 --------------------------
@@ -40,6 +41,7 @@ from customfmt.formatter import ProcessFile
 from customfmt.indexer import IndexPaths
 from customfmt.io import WriteUtf8Lf
 from customfmt.rename_plan import PlanFile
+from customfmt.rename_symbol_plan import PlanRenameSymbol
 from customfmt.symbols.project_graph import FindRefsByName, FindRefsBySymbol
 from customfmt.symbols.resolver import ResolveFile, ResolveResultSet
 from customfmt.types import Violation
@@ -247,6 +249,50 @@ def _BuildParser(prog: str = "customfmt") -> argparse.ArgumentParser:
       help="Pretty-print JSON with indentation.",
    )
    refs_p.add_argument(
+      "--output",
+      metavar="PATH",
+      default=None,
+      help="Write JSON to PATH instead of stdout.",
+   )
+
+   # -- rename-symbol --------------------------------------------------------
+   sym_p = sub.add_parser(
+      "rename-symbol",
+      help="Plan a read-only project-wide symbol rename.",
+      description=(
+         "Walk Python files, find safe project references for one symbol, "
+         "and emit a JSON-only rename plan. Does not modify any files."
+      ),
+   )
+   sym_p.add_argument(
+      "paths", nargs="+", metavar="PATH", help="Files or directories to inspect."
+   )
+   sym_query = sym_p.add_mutually_exclusive_group(required=True)
+   sym_query.add_argument(
+      "--symbol",
+      metavar="PATH:LINE:COL",
+      default=None,
+      help="Plan rename for the definition or reference at PATH:LINE:COL.",
+   )
+   sym_query.add_argument(
+      "--name",
+      metavar="NAME",
+      default=None,
+      help="Plan rename for NAME if it resolves to exactly one definition.",
+   )
+   sym_p.add_argument(
+      "--to",
+      metavar="NewName",
+      required=True,
+      dest="new_name",
+      help="New symbol name to use in the read-only plan.",
+   )
+   sym_p.add_argument(
+      "--pretty",
+      action="store_true",
+      help="Pretty-print JSON with indentation.",
+   )
+   sym_p.add_argument(
       "--output",
       metavar="PATH",
       default=None,
@@ -517,6 +563,44 @@ def _CmdRefs(args: argparse.Namespace) -> int:
    return 0
 
 
+def _CmdRenameSymbol(args: argparse.Namespace) -> int:
+   import json as _json
+
+   try:
+      plan, disc_errors = PlanRenameSymbol(
+         args.paths,
+         symbol=args.symbol,
+         name=args.name,
+         new_name=args.new_name,
+      )
+   except ValueError as exc:
+      print(f"customfmt: error: {exc}", file=sys.stderr)
+      return 2
+
+   if disc_errors:
+      for err in disc_errors:
+         print(f"customfmt: error: {err}", file=sys.stderr)
+      return 2
+
+   if plan is None:
+      print("customfmt: no Python files found.", file=sys.stderr)
+      return 2
+
+   indent = 2 if args.pretty else None
+   serialised = _json.dumps(plan.ToDict(), indent=indent)
+
+   if args.output:
+      try:
+         WriteUtf8Lf(Path(args.output), serialised + "\n")
+      except OSError as exc:
+         print(f"customfmt: error writing {args.output}: {exc}", file=sys.stderr)
+         return 2
+   else:
+      print(serialised)
+
+   return 0
+
+
 # ---------------------------------------------------------------------------
 # Entry points
 # ---------------------------------------------------------------------------
@@ -539,6 +623,8 @@ def Main(argv: list[str] | None = None, *, prog: str = "customfmt") -> int:
          return _CmdResolve(args)
       elif args.command == "refs":
          return _CmdRefs(args)
+      elif args.command == "rename-symbol":
+         return _CmdRenameSymbol(args)
       else:  # pragma: no cover
          parser.print_help()
          return 2

@@ -6,6 +6,7 @@ Works **alongside** Ruff and Pyright — it does not replace them.
 - `customfmt fix` – applies safe auto-formatting in place  
 - `customfmt check` – checks project-specific naming and style rules (CF001–CF019)
 - `customfmt refs` – discovers read-only project references as JSON
+- `customfmt rename-symbol` – emits a read-only project-wide rename plan as JSON
 
 ---
 
@@ -218,6 +219,67 @@ reported definition or reference includes a `confidence` value:
 | `import_resolved` | resolved through a supported import between files   |
 | `unresolved`      | no safe local or import target was found            |
 | `dynamic`         | skipped because the reference is dynamic/attribute-based |
+
+---
+
+### `customfmt rename-symbol` — plan a read-only project-wide symbol rename
+
+```bash
+# Plan a rename from an exact definition/reference location
+customfmt rename-symbol src/ --symbol src/models.py:1:0 --to AccountModel
+
+# Plan by name only when exactly one supported definition matches
+customfmt rename-symbol src/ --name UserModel --to AccountModel --pretty
+
+# Write JSON to a file instead of stdout
+customfmt rename-symbol src/ --name BuildValue --to MakeValue --output rename-plan.json
+```
+
+`customfmt rename-symbol` emits JSON only. It is intentionally read-only: it
+does not apply edits, write source files, or produce diffs. The command uses
+`customfmt refs` project reference results as its source of truth, then reports
+exact token edit sites that a future applier could use. If `--name` matches
+multiple supported definitions, the command returns an ambiguity error and
+requires `--symbol PATH:LINE:COL`.
+
+Supported v1 targets are conservative:
+
+- class definitions,
+- function definitions,
+- module-level declarations,
+- safely resolved `from module import Name` bindings, and
+- safely resolved imported module attribute calls such as `module.Function()`,
+  where only the attribute token is planned for editing.
+
+Unsupported or unsafe references are excluded from edits and reported in
+`skipped`, `unresolved_references`, or `dynamic_references`: local variables
+(use `customfmt rename` for those), methods, instance/class attributes, dynamic
+attribute calls, unresolved imports, relative imports, wildcard imports, string
+references, `getattr()`, `globals()`, and `importlib` patterns.
+
+The JSON shape is:
+
+```json
+{
+  "query": {"type": "name", "name": "UserModel"},
+  "target": {"name": "UserModel", "kind": "class"},
+  "new_name": "AccountModel",
+  "files_affected": ["src/models.py"],
+  "edits": [
+    {"file": "src/models.py", "line": 1, "col": 6, "old": "UserModel", "new": "AccountModel", "kind": "definition:class"}
+  ],
+  "skipped": [],
+  "unresolved_references": [],
+  "dynamic_references": [],
+  "warnings": [],
+  "summary": {"edits": 1}
+}
+```
+
+New names are validated with the project naming rules: class/function/import
+alias targets require `PascalCase`; module declarations require `PascalCase`
+or `UPPER_CASE`. Collision checks add safety warnings when the same scope or
+an importing file already binds the requested new name.
 
 
 ---
