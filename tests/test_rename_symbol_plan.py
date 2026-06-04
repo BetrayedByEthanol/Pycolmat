@@ -665,7 +665,68 @@ class TestRenameSymbolApply:
       assert first.read_text(encoding="utf-8") == first_original
       assert second.read_text(encoding="utf-8") == second_original
 
-   def TestApplySkipsDynamicAndUnresolvedReferences(self, tmp_path):
+   def TestApplyRejectsCollisionWarningAndWritesNothing(self, tmp_path):
+      original = Src(
+         """
+         class UserModel:
+            pass
+
+         class AccountModel:
+            pass
+         """
+      )
+      f = Write(tmp_path / "main.py", original)
+
+      rc, out, err = self.RunApply(f, "--name", "UserModel", "--to", "AccountModel")
+
+      assert rc == 2
+      assert out == ""
+      assert "warning(s)" in err
+      assert "--allow-incomplete" in err
+      assert f.read_text(encoding="utf-8") == original
+
+   def TestApplyAllowIncompleteWithCollisionWarningEditsSafeSites(self, tmp_path):
+      f = Write(
+         tmp_path / "main.py",
+         Src(
+            """
+            class UserModel:
+               pass
+
+            class AccountModel:
+               pass
+            """
+         ),
+      )
+
+      rc, _, err = self.RunApply(
+         f, "--name", "UserModel", "--to", "AccountModel", "--allow-incomplete"
+      )
+
+      assert rc == 0
+      assert err == ""
+      assert f.read_text(encoding="utf-8").count("class AccountModel:") == 2
+
+   def TestApplyRejectsDynamicReferenceAndWritesNothing(self, tmp_path):
+      original = Src(
+         """
+         class UserModel:
+            pass
+
+         def Run(obj):
+            return obj.UserModel()
+         """
+      )
+      f = Write(tmp_path / "main.py", original)
+
+      rc, out, err = self.RunApply(f, "--name", "UserModel", "--to", "AccountModel")
+
+      assert rc == 2
+      assert out == ""
+      assert "dynamic reference(s)" in err
+      assert f.read_text(encoding="utf-8") == original
+
+   def TestApplyAllowIncompleteWithDynamicReferenceEditsOnlySafeSites(self, tmp_path):
       f = Write(
          tmp_path / "main.py",
          Src(
@@ -675,17 +736,120 @@ class TestRenameSymbolApply:
 
             def Run(obj):
                return obj.UserModel()
-
-            from external.pkg import UserModel
             """
          ),
       )
 
-      rc, _, err = self.RunApply(f, "--symbol", f"{f}:2:0", "--to", "AccountModel")
+      rc, _, err = self.RunApply(
+         f, "--name", "UserModel", "--to", "AccountModel", "--allow-incomplete"
+      )
 
       assert rc == 0
       assert err == ""
       text = f.read_text(encoding="utf-8")
       assert "class AccountModel:" in text
       assert "return obj.UserModel()" in text
+
+   def TestApplyRejectsUnresolvedReferenceAndWritesNothing(self, tmp_path, monkeypatch):
+      f = Write(tmp_path / "main.py", "class UserModel:\n   pass\n")
+      original = f.read_text(encoding="utf-8")
+      plan = RenameSymbolPlan(Query={}, Target=None, NewName="AccountModel")
+      plan.Edits.append(
+         RenameSymbolEdit(str(f), 1, 6, "UserModel", "AccountModel", "definition:class")
+      )
+      plan.UnresolvedReferences.append({
+         "reason":     "unresolved",
+         "file":       str(f),
+         "line":       10,
+         "col":        3,
+         "name":       "UserModel",
+         "kind":       "call",
+         "confidence": "unresolved",
+      })
+      monkeypatch.setattr("customfmt.cli.PlanRenameSymbol", lambda *args, **kwargs: (plan, []))
+
+      rc, out, err = self.RunApply(f, "--name", "UserModel", "--to", "AccountModel")
+
+      assert rc == 2
+      assert out == ""
+      assert "unresolved reference(s)" in err
+      assert f.read_text(encoding="utf-8") == original
+
+   def TestApplyAllowIncompleteWithUnresolvedReferenceEditsSafeSites(
+      self, tmp_path, monkeypatch
+   ):
+      f = Write(tmp_path / "main.py", "class UserModel:\n   pass\n")
+      plan = RenameSymbolPlan(Query={}, Target=None, NewName="AccountModel")
+      plan.Edits.append(
+         RenameSymbolEdit(str(f), 1, 6, "UserModel", "AccountModel", "definition:class")
+      )
+      plan.UnresolvedReferences.append({
+         "reason":     "unresolved",
+         "file":       str(f),
+         "line":       10,
+         "col":        3,
+         "name":       "UserModel",
+         "kind":       "call",
+         "confidence": "unresolved",
+      })
+      monkeypatch.setattr("customfmt.cli.PlanRenameSymbol", lambda *args, **kwargs: (plan, []))
+
+      rc, _, err = self.RunApply(
+         f, "--name", "UserModel", "--to", "AccountModel", "--allow-incomplete"
+      )
+
+      assert rc == 0
+      assert err == ""
+      assert "class AccountModel:" in f.read_text(encoding="utf-8")
+
+   def TestApplyRejectsSkippedReferenceAndWritesNothing(self, tmp_path):
+      original = Src(
+         """
+         class UserModel:
+            pass
+
+         from external.pkg import UserModel
+         """
+      )
+      f = Write(tmp_path / "main.py", original)
+
+      rc, out, err = self.RunApply(f, "--name", "UserModel", "--to", "AccountModel")
+
+      assert rc == 2
+      assert out == ""
+      assert "skipped reference(s)" in err
+      assert f.read_text(encoding="utf-8") == original
+
+   def TestApplyAllowIncompleteWithSkippedReferenceEditsOnlySafeSites(self, tmp_path):
+      f = Write(
+         tmp_path / "main.py",
+         Src(
+            """
+            class UserModel:
+               pass
+
+            from external.pkg import UserModel
+            """
+         ),
+      )
+
+      rc, _, err = self.RunApply(
+         f, "--name", "UserModel", "--to", "AccountModel", "--allow-incomplete"
+      )
+
+      assert rc == 0
+      assert err == ""
+      text = f.read_text(encoding="utf-8")
+      assert "class AccountModel:" in text
       assert "from external.pkg import UserModel" in text
+
+   def TestAllowIncompleteWithoutApplyIsRejected(self, tmp_path):
+      f = Write(tmp_path / "main.py", "class UserModel:\n   pass\n")
+
+      rc, data, err = RunPlan(
+         f, "--name", "UserModel", "--to", "AccountModel", "--allow-incomplete"
+      )
+
+      assert rc == 2
+      assert data == {}
+      assert "--allow-incomplete requires --apply" in err

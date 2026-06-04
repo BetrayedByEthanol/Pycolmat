@@ -9,7 +9,7 @@ Commands
   customfmt index   [--pretty] [--output PATH] <paths...>
   customfmt resolve [--pretty] [--output PATH] <paths...>
   customfmt refs [--name NAME | --symbol PATH:LINE:COL] [--pretty] [--output PATH] <paths...>
-  customfmt rename-symbol [--name NAME | --symbol PATH:LINE:COL] --to NAME [--pretty] [--output PATH] [--diff | --apply] <paths...>
+  customfmt rename-symbol [--name NAME | --symbol PATH:LINE:COL] --to NAME [--pretty] [--output PATH] [--diff | --apply] [--allow-incomplete] <paths...>
 
 Aliases (console_scripts)
 --------------------------
@@ -309,6 +309,14 @@ def _BuildParser(prog: str = "customfmt") -> argparse.ArgumentParser:
       action="store_true",
       help="Apply guarded token edits from the rename plan.",
    )
+   sym_p.add_argument(
+      "--allow-incomplete",
+      action="store_true",
+      help=(
+         "With --apply only, allow applying safe planned edits even when "
+         "the plan contains warnings or skipped/incomplete references."
+      ),
+   )
 
    return parser
 
@@ -589,6 +597,9 @@ def _CmdRenameSymbol(args: argparse.Namespace) -> int:
    if args.apply and args.pretty:
       print("customfmt: error: --apply cannot be combined with --pretty", file=sys.stderr)
       return 2
+   if args.allow_incomplete and not args.apply:
+      print("customfmt: error: --allow-incomplete requires --apply", file=sys.stderr)
+      return 2
 
    try:
       plan, disc_errors = PlanRenameSymbol(
@@ -619,6 +630,9 @@ def _CmdRenameSymbol(args: argparse.Namespace) -> int:
       return 0
 
    if args.apply:
+      if not args.allow_incomplete and _PlanHasIncompleteApplySignals(plan):
+         print(_FormatIncompleteApplyError(plan), file=sys.stderr)
+         return 2
       try:
          rendered_by_file = RenderPlanTextByFile(plan)
       except (OSError, UnicodeDecodeError, ValueError) as exc:
@@ -647,6 +661,32 @@ def _CmdRenameSymbol(args: argparse.Namespace) -> int:
       print(serialised)
 
    return 0
+
+
+def _PlanHasIncompleteApplySignals(plan) -> bool:
+   return bool(
+      plan.Warnings
+      or plan.Skipped
+      or plan.UnresolvedReferences
+      or plan.DynamicReferences
+   )
+
+
+def _FormatIncompleteApplyError(plan) -> str:
+   parts: list[str] = []
+   if plan.Warnings:
+      parts.append(f"{len(plan.Warnings)} warning(s)")
+   if plan.Skipped:
+      parts.append(f"{len(plan.Skipped)} skipped reference(s)")
+   if plan.UnresolvedReferences:
+      parts.append(f"{len(plan.UnresolvedReferences)} unresolved reference(s)")
+   if plan.DynamicReferences:
+      parts.append(f"{len(plan.DynamicReferences)} dynamic reference(s)")
+   summary = ", ".join(parts)
+   return (
+      "customfmt: error: rename-symbol --apply refused incomplete plan "
+      f"({summary}); rerun with --allow-incomplete to apply only safe planned edits"
+   )
 
 
 # ---------------------------------------------------------------------------

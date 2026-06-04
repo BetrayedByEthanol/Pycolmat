@@ -336,9 +336,13 @@ the local `customfmt rename` applier or use separate text-replacement logic.
 render unified diffs from those plans, or apply edits in guarded `--apply` mode.
 Apply mode must reuse the same renderer/validation path as diff rendering,
 validate all affected files before writing any file, preserve UTF-8 LF output,
-and avoid partial writes on validation failures. Keep implementation separate
-from the resolver and from `symbols/project_graph.py`; the project graph remains
-read-only reference discovery.
+and avoid partial writes on validation failures. By default, apply mode must
+fail with exit 2 and write nothing when the plan contains warnings, skipped
+items, unresolved references, or dynamic references; only explicit
+`--allow-incomplete` may override that guard for `--apply`. `--allow-incomplete`
+is apply-only and must be rejected for JSON plan or diff modes. Keep
+implementation separate from the resolver and from `symbols/project_graph.py`;
+the project graph remains read-only reference discovery.
 
 Supported v1 targets are class definitions, function definitions, module-level
 declarations, safely resolved `from module import Name` bindings, and safely

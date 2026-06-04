@@ -239,6 +239,9 @@ customfmt rename-symbol src/ --name UserModel --to AccountModel --diff
 
 # Apply guarded token edits after validating every affected file
 customfmt rename-symbol src/ --name UserModel --to AccountModel --apply
+
+# Explicitly allow applying safe edits when warnings/skips are present
+customfmt rename-symbol src/ --name UserModel --to AccountModel --apply --allow-incomplete
 ```
 
 `customfmt rename-symbol` emits JSON by default, pretty JSON with `--pretty`,
@@ -252,12 +255,17 @@ target an existing `NAME` token whose text matches the recorded `old` value,
 and no source file is written if validation fails for any affected file. Apply
 mode writes files with UTF-8 LF normalization and prints `renamed <path>` for
 each written file; if the plan has no edits, it prints nothing and exits 0.
-`--apply` cannot be combined with `--diff`, `--output`, or `--pretty`. `--diff`
-cannot be combined with `--output`; that incompatible option pair exits with
-code 2 before writing any output file. `--pretty` only affects JSON output and
-is ignored in diff mode. The command uses `customfmt refs` project reference
-results as its source of truth, then reports, renders, or applies exact token
-edit sites. If `--name` matches
+By default, `--apply` refuses to write and exits 2 when the plan contains any
+`warnings`, `skipped`, `unresolved_references`, or `dynamic_references`. Use
+`--apply --allow-incomplete` only when you have reviewed the JSON or diff and
+want to apply the safe planned token edits while leaving incomplete, skipped,
+or dynamic sites untouched. `--allow-incomplete` is apply-only; using it with
+JSON plan mode or `--diff` exits 2. `--apply` cannot be combined with `--diff`,
+`--output`, or `--pretty`. `--diff` cannot be combined with `--output`; that
+incompatible option pair exits with code 2 before writing any output file.
+`--pretty` only affects JSON output and is ignored in diff mode. The command
+uses `customfmt refs` project reference results as its source of truth, then
+reports, renders, or applies exact token edit sites. If `--name` matches
 multiple supported definitions, the command returns an ambiguity error and
 requires `--symbol PATH:LINE:COL`.
 
