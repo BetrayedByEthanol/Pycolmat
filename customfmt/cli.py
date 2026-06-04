@@ -9,7 +9,7 @@ Commands
   customfmt index   [--pretty] [--output PATH] <paths...>
   customfmt resolve [--pretty] [--output PATH] <paths...>
   customfmt refs [--name NAME | --symbol PATH:LINE:COL] [--pretty] [--output PATH] <paths...>
-  customfmt rename-symbol [--name NAME | --symbol PATH:LINE:COL] --to NAME [--pretty] [--output PATH] <paths...>
+  customfmt rename-symbol [--name NAME | --symbol PATH:LINE:COL] --to NAME [--pretty] [--output PATH] [--diff] <paths...>
 
 Aliases (console_scripts)
 --------------------------
@@ -42,6 +42,7 @@ from customfmt.indexer import IndexPaths
 from customfmt.io import WriteUtf8Lf
 from customfmt.rename_plan import PlanFile
 from customfmt.rename_symbol_plan import PlanRenameSymbol
+from customfmt.rename_symbol_render import RenderPlanDiff
 from customfmt.symbols.project_graph import FindRefsByName, FindRefsBySymbol
 from customfmt.symbols.resolver import ResolveFile, ResolveResultSet
 from customfmt.types import Violation
@@ -261,7 +262,7 @@ def _BuildParser(prog: str = "customfmt") -> argparse.ArgumentParser:
       help="Plan a read-only project-wide symbol rename.",
       description=(
          "Walk Python files, find safe project references for one symbol, "
-         "and emit a JSON-only rename plan. Does not modify any files."
+         "and emit a JSON rename plan or unified diff. Does not modify any files."
       ),
    )
    sym_p.add_argument(
@@ -297,6 +298,11 @@ def _BuildParser(prog: str = "customfmt") -> argparse.ArgumentParser:
       metavar="PATH",
       default=None,
       help="Write JSON to PATH instead of stdout.",
+   )
+   sym_p.add_argument(
+      "--diff",
+      action="store_true",
+      help="Print a unified diff from the rename plan without writing files.",
    )
 
    return parser
@@ -585,6 +591,14 @@ def _CmdRenameSymbol(args: argparse.Namespace) -> int:
    if plan is None:
       print("customfmt: no Python files found.", file=sys.stderr)
       return 2
+
+   if args.diff:
+      try:
+         print(RenderPlanDiff(plan), end="")
+      except (OSError, UnicodeDecodeError, ValueError) as exc:
+         print(f"customfmt: error: {exc}", file=sys.stderr)
+         return 2
+      return 0
 
    indent = 2 if args.pretty else None
    serialised = _json.dumps(plan.ToDict(), indent=indent)

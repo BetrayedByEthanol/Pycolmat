@@ -6,7 +6,7 @@ Works **alongside** Ruff and Pyright — it does not replace them.
 - `customfmt fix` – applies safe auto-formatting in place  
 - `customfmt check` – checks project-specific naming and style rules (CF001–CF019)
 - `customfmt refs` – discovers read-only project references as JSON
-- `customfmt rename-symbol` – emits a read-only project-wide rename plan as JSON
+- `customfmt rename-symbol` – emits a read-only project-wide rename plan as JSON or unified diff
 
 ---
 
@@ -233,12 +233,17 @@ customfmt rename-symbol src/ --name UserModel --to AccountModel --pretty
 
 # Write JSON to a file instead of stdout
 customfmt rename-symbol src/ --name BuildValue --to MakeValue --output rename-plan.json
+
+# Render a read-only unified diff instead of JSON
+customfmt rename-symbol src/ --name UserModel --to AccountModel --diff
 ```
 
-`customfmt rename-symbol` emits JSON only. It is intentionally read-only: it
-does not apply edits, write source files, or produce diffs. The command uses
-`customfmt refs` project reference results as its source of truth, then reports
-exact token edit sites that a future applier could use. If `--name` matches
+`customfmt rename-symbol` emits JSON by default, pretty JSON with `--pretty`,
+writes JSON with `--output PATH`, and renders a read-only unified diff with
+`--diff`. When `--diff` is used, JSON is not printed and source files are not
+modified. The command uses `customfmt refs` project reference results as its
+source of truth, then reports or renders exact token edit sites that a future
+applier could use. If `--name` matches
 multiple supported definitions, the command returns an ambiguity error and
 requires `--symbol PATH:LINE:COL`.
 
