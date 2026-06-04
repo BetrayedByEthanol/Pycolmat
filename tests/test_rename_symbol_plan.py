@@ -199,6 +199,104 @@ class TestRenameSymbolPlan:
       assert data["dynamic_references"]
       assert data["dynamic_references"][0]["confidence"] == "dynamic"
 
+   def TestMethodRenameRejected(self, tmp_path):
+      f = Write(
+         tmp_path / "main.py",
+         Src(
+            '''
+            class UserModel:
+               def BuildValue(self):
+                  return 1
+            '''
+         ),
+      )
+
+      rc, data, err = RunPlan(f, "--name", "BuildValue", "--to", "MakeValue")
+
+      assert rc == 2
+      assert data == {}
+      assert "supported project symbol" in err
+
+   def TestClassAttributeRenameRejected(self, tmp_path):
+      f = Write(
+         tmp_path / "main.py",
+         Src(
+            '''
+            class UserModel:
+               Status = 1
+            '''
+         ),
+      )
+
+      rc, data, err = RunPlan(f, "--name", "Status", "--to", "State")
+
+      assert rc == 2
+      assert data == {}
+      assert "supported project symbol" in err
+
+   def TestRelativeImportStaysUnresolvedInPlan(self, tmp_path):
+      pkg = Package(tmp_path)
+      Write(pkg / "models.py", "class UserModel:\n   pass\n")
+      Write(
+         pkg / "main.py",
+         Src(
+            '''
+            from .models import UserModel
+
+            def Build():
+               return UserModel()
+            '''
+         ),
+      )
+
+      rc, data, _ = RunPlan(pkg, "--name", "UserModel", "--to", "AccountModel")
+      reasons = [item["reason"] for item in data["skipped"]]
+
+      assert rc == 0
+      assert "import_not_safely_resolved" in reasons
+      assert any(item["kind"] == "import_from" for item in data["skipped"])
+
+   def TestWildcardImportReferenceStaysUnresolvedInPlan(self, tmp_path):
+      pkg = Package(tmp_path)
+      Write(pkg / "models.py", "class UserModel:\n   pass\n")
+      Write(
+         pkg / "main.py",
+         Src(
+            '''
+            from pkg.models import *
+
+            def Build():
+               return UserModel()
+            '''
+         ),
+      )
+
+      rc, data, _ = RunPlan(pkg, "--name", "UserModel", "--to", "AccountModel")
+
+      assert rc == 0
+      assert data["unresolved_references"]
+      assert data["unresolved_references"][0]["name"] == "UserModel"
+
+   def TestStringAndCommentReferencesAreNotPlanned(self, tmp_path):
+      f = Write(
+         tmp_path / "main.py",
+         Src(
+            '''
+            class UserModel:
+               pass
+
+            MESSAGE = "UserModel"
+            # UserModel stays in comments
+            '''
+         ),
+      )
+
+      rc, data, _ = RunPlan(f, "--name", "UserModel", "--to", "AccountModel")
+
+      assert rc == 0
+      assert len(data["edits"]) == 1
+      assert data["edits"][0]["kind"] == "definition:class"
+
    def TestAmbiguousNameReturnsError(self, tmp_path):
       Write(tmp_path / "a.py", "class UserModel:\n   pass\n")
       Write(tmp_path / "b.py", "class UserModel:\n   pass\n")
@@ -801,6 +899,93 @@ class TestRenameSymbolApply:
       assert rc == 0
       assert err == ""
       assert "class AccountModel:" in f.read_text(encoding="utf-8")
+
+   def TestApplyRejectsRelativeImportAndWritesNothing(self, tmp_path):
+      pkg = Package(tmp_path)
+      Write(pkg / "models.py", "class UserModel:\n   pass\n")
+      main_original = Src(
+         '''
+         from .models import UserModel
+
+         def Build():
+            return UserModel()
+         '''
+      )
+      main = Write(pkg / "main.py", main_original)
+
+      rc, out, err = self.RunApply(pkg, "--name", "UserModel", "--to", "AccountModel")
+
+      assert rc == 2
+      assert out == ""
+      assert "skipped reference(s)" in err
+      assert main.read_text(encoding="utf-8") == main_original
+
+   def TestApplyRejectsWildcardImportAndWritesNothing(self, tmp_path):
+      pkg = Package(tmp_path)
+      Write(pkg / "models.py", "class UserModel:\n   pass\n")
+      main_original = Src(
+         '''
+         from pkg.models import *
+
+         def Build():
+            return UserModel()
+         '''
+      )
+      main = Write(pkg / "main.py", main_original)
+
+      rc, out, err = self.RunApply(pkg, "--name", "UserModel", "--to", "AccountModel")
+
+      assert rc == 2
+      assert out == ""
+      assert "unresolved reference(s)" in err
+      assert main.read_text(encoding="utf-8") == main_original
+
+   def TestApplyAllowIncompleteWithWildcardImportEditsOnlySafeSites(self, tmp_path):
+      pkg = Package(tmp_path)
+      model = Write(pkg / "models.py", "class UserModel:\n   pass\n")
+      main = Write(
+         pkg / "main.py",
+         Src(
+            '''
+            from pkg.models import *
+
+            def Build():
+               return UserModel()
+            '''
+         ),
+      )
+
+      rc, _, err = self.RunApply(
+         pkg, "--name", "UserModel", "--to", "AccountModel", "--allow-incomplete"
+      )
+
+      assert rc == 0
+      assert err == ""
+      assert "class AccountModel:" in model.read_text(encoding="utf-8")
+      assert "return UserModel()" in main.read_text(encoding="utf-8")
+
+   def TestApplyDoesNotEditStringsOrComments(self, tmp_path):
+      f = Write(
+         tmp_path / "main.py",
+         Src(
+            '''
+            class UserModel:
+               pass
+
+            MESSAGE = "UserModel"
+            # UserModel stays in comments
+            '''
+         ),
+      )
+
+      rc, _, err = self.RunApply(f, "--name", "UserModel", "--to", "AccountModel")
+
+      assert rc == 0
+      assert err == ""
+      text = f.read_text(encoding="utf-8")
+      assert "class AccountModel:" in text
+      assert 'MESSAGE = "UserModel"' in text
+      assert "# UserModel stays in comments" in text
 
    def TestApplyRejectsSkippedReferenceAndWritesNothing(self, tmp_path):
       original = Src(

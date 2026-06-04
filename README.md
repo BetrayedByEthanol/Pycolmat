@@ -244,45 +244,85 @@ customfmt rename-symbol src/ --name UserModel --to AccountModel --apply
 customfmt rename-symbol src/ --name UserModel --to AccountModel --apply --allow-incomplete
 ```
 
-`customfmt rename-symbol` emits JSON by default, pretty JSON with `--pretty`,
-writes JSON with `--output PATH`, renders a read-only unified diff with
-`--diff`, and applies guarded token edits with `--apply`. When `--diff` is
-used, JSON is not printed and source files are not modified. Diff mode is
-read-only, so it renders proposed token edits to stdout without applying them
-to source files. `--apply` reuses the same token renderer and validation path
-as diff mode: every affected file is rendered first, every planned edit must
-target an existing `NAME` token whose text matches the recorded `old` value,
-and no source file is written if validation fails for any affected file. Apply
-mode writes files with UTF-8 LF normalization and prints `renamed <path>` for
-each written file; if the plan has no edits, it prints nothing and exits 0.
-By default, `--apply` refuses to write and exits 2 when the plan contains any
-`warnings`, `skipped`, `unresolved_references`, or `dynamic_references`. Use
-`--apply --allow-incomplete` only when you have reviewed the JSON or diff and
-want to apply the safe planned token edits while leaving incomplete, skipped,
-or dynamic sites untouched. `--allow-incomplete` is apply-only; using it with
-JSON plan mode or `--diff` exits 2. `--apply` cannot be combined with `--diff`,
-`--output`, or `--pretty`. `--diff` cannot be combined with `--output`; that
-incompatible option pair exits with code 2 before writing any output file.
-`--pretty` only affects JSON output and is ignored in diff mode. The command
-uses `customfmt refs` project reference results as its source of truth, then
-reports, renders, or applies exact token edit sites. If `--name` matches
-multiple supported definitions, the command returns an ambiguity error and
-requires `--symbol PATH:LINE:COL`.
+`customfmt rename-symbol` is v1 conservative and stable enough for
+guarded use. It is not an IDE-level refactor engine, and it intentionally does
+not support every Python reference pattern. It emits JSON by default, pretty
+JSON with `--pretty`, writes JSON with `--output PATH`, renders a read-only
+unified diff with `--diff`, and applies guarded token edits with `--apply`.
+When `--diff` is used, JSON is not printed and source files are not modified.
+Diff mode is read-only, so it renders proposed token edits to stdout without
+applying them to source files. `--apply` reuses the same token renderer and
+validation path as diff mode: every affected file is rendered first, every
+planned edit must target an existing `NAME` token whose text matches the
+recorded `old` value, and no source file is written if validation fails for
+any affected file. Apply mode writes files with UTF-8 LF normalization and
+prints `renamed <path>` for each written file; if the plan has no edits, it
+prints nothing and exits 0. By default, `--apply` refuses to write and exits 2
+when the plan contains any `warnings`, `skipped`, `unresolved_references`, or
+`dynamic_references`. Use `--apply --allow-incomplete` only when you have
+reviewed the JSON or diff and want to apply the safe planned token edits while
+leaving incomplete, skipped, or dynamic sites untouched. Always run tests after
+applying a project-wide rename. `--allow-incomplete` is apply-only; using it
+with JSON plan mode or `--diff` exits 2. `--apply` cannot be combined with
+`--diff`, `--output`, or `--pretty`. `--diff` cannot be combined with
+`--output`; that incompatible option pair exits with code 2 before writing any
+output file. `--pretty` only affects JSON output and is ignored in diff mode.
+The command uses `customfmt refs` project reference results as its source of
+truth, then reports, renders, or applies exact token edit sites. If `--name`
+matches multiple supported definitions, the command returns an ambiguity error
+and requires `--symbol PATH:LINE:COL`.
 
-Supported v1 targets are conservative:
+#### `rename-symbol` v1 workflow examples
 
-- class definitions,
-- function definitions,
-- module-level declarations,
-- safely resolved `from module import Name` bindings, and
-- safely resolved imported module attribute calls such as `module.Function()`,
-  where only the attribute token is planned for editing.
+```bash
+# Preview the JSON token edit plan
+customfmt rename-symbol src/ --name UserModel --to AccountModel --pretty
 
-Unsupported or unsafe references are excluded from edits and reported in
-`skipped`, `unresolved_references`, or `dynamic_references`: local variables
-(use `customfmt rename` for those), methods, instance/class attributes, dynamic
-attribute calls, unresolved imports, relative imports, wildcard imports, string
-references, `getattr()`, `globals()`, and `importlib` patterns.
+# Preview the unified diff without writing files
+customfmt rename-symbol src/ --name UserModel --to AccountModel --diff
+
+# Apply only when the plan is complete and guarded validation succeeds
+customfmt rename-symbol src/ --name UserModel --to AccountModel --apply
+
+# Explicitly apply safe edits from an incomplete plan after review
+customfmt rename-symbol src/ --name UserModel --to AccountModel --apply --allow-incomplete
+```
+
+`--allow-incomplete` does not make unsupported references editable. It applies
+only safe planned token edits and leaves warnings, skipped, unresolved, and
+dynamic sites untouched.
+
+#### `rename-symbol` v1 support matrix
+
+Supported v1 rename sites are conservative:
+
+| Pattern | Status | Notes |
+|---------|--------|-------|
+| Class definitions | Supported | Renames the class definition token. |
+| Function definitions | Supported | Renames module-level and nested function definition tokens when selected as supported functions. |
+| Module-level declarations | Supported | Renames direct module-level assignment or annotation names. |
+| `from module import Name` | Supported | Renames the imported binding when the import resolves to the selected local project symbol. |
+| `from module import Name as Alias` | Supported alias behavior | Renaming the original target edits the exported definition but does not rewrite `Alias`; selecting the alias symbol can rename the alias binding and its safe alias references. |
+| `import module; module.Function()` | Supported | Renames only the final attribute token when the module import resolves safely. |
+| Annotations | Supported | Safe resolved annotation name tokens are planned. |
+| Constructor and call references | Supported | Safe resolved call tokens such as `UserModel()` and `BuildValue()` are planned. |
+
+Unsupported v1 patterns are excluded from edits and reported as skipped,
+unresolved, or dynamic when detected:
+
+| Pattern | Status | Notes |
+|---------|--------|-------|
+| Local variables | Unsupported | Use `customfmt rename` for local variable cleanup. |
+| Methods | Unsupported | Do not rename method definitions with `rename-symbol`. |
+| Instance attributes | Unsupported | Includes direct attribute definitions and reads. |
+| Class attributes | Unsupported | Class-body declarations are not project-wide rename targets. |
+| `self.X` | Unsupported | Treated as dynamic/attribute-based. |
+| `obj.Method()` | Unsupported | Dynamic attribute calls are not guessed. |
+| Wildcard imports | Unsupported | `from module import *` references stay unresolved for rename purposes. |
+| Relative imports | Unsupported | Relative imports stay unresolved in v1. |
+| String references | Unsupported | Strings are never rewritten. |
+| `getattr` / `globals` / `importlib` / `eval` / `exec` | Unsupported | Dynamic patterns are skipped or left unresolved rather than guessed. |
+| Unresolved external imports | Unsupported | External imports that cannot be safely resolved are blocked by default in apply mode. |
 
 The JSON shape is:
 

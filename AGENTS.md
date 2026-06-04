@@ -59,6 +59,26 @@ customfmt refs customfmt/ --name ResolveFile --pretty
 
 ---
 
+## Safe project-wide rename workflow
+
+Agents must use the guarded project-wide rename planner before changing a
+project symbol across files:
+
+```bash
+customfmt rename-symbol customfmt/ --name OldName --to NewName --pretty
+customfmt rename-symbol customfmt/ --name OldName --to NewName --diff
+customfmt rename-symbol customfmt/ --name OldName --to NewName --apply
+try-auto-format customfmt/ tests/
+check-format customfmt/ tests/
+pytest
+```
+
+Do not use text search/replace for project-wide renames. Use
+`rename-symbol` first so edits come from the guarded token plan. Do not use
+`--allow-incomplete` unless explicitly instructed.
+
+---
+
 ## Formatting rules agents must follow
 
 ### Python indentation
