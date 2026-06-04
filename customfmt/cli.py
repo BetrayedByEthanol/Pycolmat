@@ -291,7 +291,7 @@ def _BuildParser(prog: str = "customfmt") -> argparse.ArgumentParser:
    sym_p.add_argument(
       "--pretty",
       action="store_true",
-      help="Pretty-print JSON with indentation.",
+      help="Pretty-print JSON with indentation (ignored with --diff).",
    )
    sym_p.add_argument(
       "--output",
@@ -571,6 +571,10 @@ def _CmdRefs(args: argparse.Namespace) -> int:
 
 def _CmdRenameSymbol(args: argparse.Namespace) -> int:
    import json as _json
+
+   if args.diff and args.output:
+      print("customfmt: error: --diff cannot be combined with --output", file=sys.stderr)
+      return 2
 
    try:
       plan, disc_errors = PlanRenameSymbol(
