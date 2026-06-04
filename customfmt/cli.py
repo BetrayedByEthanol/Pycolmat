@@ -8,6 +8,7 @@ Commands
   customfmt rename [--check | --diff | --apply] <paths...>
   customfmt index   [--pretty] [--output PATH] <paths...>
   customfmt resolve [--pretty] [--output PATH] <paths...>
+  customfmt refs [--name NAME | --symbol PATH:LINE:COL] [--pretty] [--output PATH] <paths...>
 
 Aliases (console_scripts)
 --------------------------
@@ -39,6 +40,7 @@ from customfmt.formatter import ProcessFile
 from customfmt.indexer import IndexPaths
 from customfmt.io import WriteUtf8Lf
 from customfmt.rename_plan import PlanFile
+from customfmt.symbols.project_graph import FindRefsByName, FindRefsBySymbol
 from customfmt.symbols.resolver import ResolveFile, ResolveResultSet
 from customfmt.types import Violation
 
@@ -208,6 +210,43 @@ def _BuildParser(prog: str = "customfmt") -> argparse.ArgumentParser:
       help="Pretty-print JSON with indentation.",
    )
    res_p.add_argument(
+      "--output",
+      metavar="PATH",
+      default=None,
+      help="Write JSON to PATH instead of stdout.",
+   )
+
+   # -- refs -----------------------------------------------------------------
+   refs_p = sub.add_parser(
+      "refs",
+      help="Find read-only project references for a name or symbol.",
+      description=(
+         "Walk Python files, resolve per-file names, and conservatively "
+         "resolve import references between files. Does not modify any files."
+      ),
+   )
+   refs_p.add_argument(
+      "paths", nargs="+", metavar="PATH", help="Files or directories to inspect."
+   )
+   query = refs_p.add_mutually_exclusive_group(required=True)
+   query.add_argument(
+      "--name",
+      metavar="NAME",
+      default=None,
+      help="Find definitions and references matching NAME.",
+   )
+   query.add_argument(
+      "--symbol",
+      metavar="PATH:LINE:COL",
+      default=None,
+      help="Find references to the definition or reference at PATH:LINE:COL.",
+   )
+   refs_p.add_argument(
+      "--pretty",
+      action="store_true",
+      help="Pretty-print JSON with indentation.",
+   )
+   refs_p.add_argument(
       "--output",
       metavar="PATH",
       default=None,
@@ -442,6 +481,42 @@ def _CmdResolve(args: argparse.Namespace) -> int:
    return 0
 
 
+def _CmdRefs(args: argparse.Namespace) -> int:
+   import json as _json
+
+   try:
+      if args.name is not None:
+         result, disc_errors = FindRefsByName(args.paths, args.name)
+      else:
+         result, disc_errors = FindRefsBySymbol(args.paths, args.symbol)
+   except ValueError as exc:
+      print(f"customfmt: error: {exc}", file=sys.stderr)
+      return 2
+
+   if disc_errors:
+      for err in disc_errors:
+         print(f"customfmt: error: {err}", file=sys.stderr)
+      return 2
+
+   if result is None:
+      print("customfmt: no Python files found.", file=sys.stderr)
+      return 2
+
+   indent = 2 if args.pretty else None
+   serialised = _json.dumps(result.ToDict(), indent=indent)
+
+   if args.output:
+      try:
+         WriteUtf8Lf(Path(args.output), serialised + "\n")
+      except OSError as exc:
+         print(f"customfmt: error writing {args.output}: {exc}", file=sys.stderr)
+         return 2
+   else:
+      print(serialised)
+
+   return 0
+
+
 # ---------------------------------------------------------------------------
 # Entry points
 # ---------------------------------------------------------------------------
@@ -462,6 +537,8 @@ def Main(argv: list[str] | None = None, *, prog: str = "customfmt") -> int:
          return _CmdIndex(args)
       elif args.command == "resolve":
          return _CmdResolve(args)
+      elif args.command == "refs":
+         return _CmdRefs(args)
       else:  # pragma: no cover
          parser.print_help()
          return 2

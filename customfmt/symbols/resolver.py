@@ -269,7 +269,7 @@ class _Resolver(ast.NodeVisitor):
       module = node.module or ""
       for alias in node.names:
          bound = alias.asname if alias.asname else alias.name
-         extra = {"module": module, "name": alias.name}
+         extra = {"module": module, "name": alias.name, "level": node.level}
          self._AddDef(
             bound, DefKind.ImportFrom, node.lineno, node.col_offset, extra
          )

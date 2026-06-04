@@ -5,6 +5,7 @@ Works **alongside** Ruff and Pyright — it does not replace them.
 
 - `customfmt fix` – applies safe auto-formatting in place  
 - `customfmt check` – checks project-specific naming and style rules (CF001–CF019)
+- `customfmt refs` – discovers read-only project references as JSON
 
 ---
 
@@ -169,6 +170,51 @@ Output is JSON with a `files` array and an `errors` array.  Each file entry
 contains `scopes`, `definitions`, `references`, and a `summary`.  References
 include a `resolved_to` field when the name was resolved within the file, and
 an `unresolved` flag when no definition was found.
+
+
+---
+
+### `customfmt refs` — find read-only project references
+
+```bash
+# Find definitions and references by name
+customfmt refs src/ --name UserModel
+
+# Find references to the symbol at PATH:LINE:COL
+customfmt refs src/ --symbol src/models.py:1:6
+
+# Pretty-print JSON
+customfmt refs src/ --name BuildValue --pretty
+
+# Write JSON to a file
+customfmt refs src/ --name BuildValue --output refs.json
+```
+
+`customfmt refs` is a project-level reference discovery foundation. It is
+read-only and does not implement project-wide rename. The command reuses the
+per-file resolver, then conservatively resolves these import forms between
+files when the target module is present in the scanned paths:
+
+- `from package.module import Name`
+- `from package.module import Name as Alias`
+- `import package.module as alias`
+- `import package.module`
+
+Relative imports may remain unresolved in this v1 foundation. Dynamic
+references are explicitly skipped rather than guessed: `self.X`,
+`obj.Method()`, `getattr()`, `globals()`, `importlib`, and string references
+are not resolved as project references.
+
+Output is always JSON with `definitions`, `references`,
+`unresolved_references`, `dynamic_references`, `errors`, and `summary`. Every
+reported definition or reference includes a `confidence` value:
+
+| Confidence        | Meaning                                             |
+|-------------------|-----------------------------------------------------|
+| `local_resolved`  | resolved by the existing per-file lexical resolver  |
+| `import_resolved` | resolved through a supported import between files   |
+| `unresolved`      | no safe local or import target was found            |
+| `dynamic`         | skipped because the reference is dynamic/attribute-based |
 
 
 ---
