@@ -465,3 +465,227 @@ class TestRenameSymbolDiff:
       assert rc == 0
       assert out == ""
       assert err == ""
+
+class TestRenameSymbolApply:
+   def RunApply(self, paths, *args: str) -> tuple[int, str, str]:
+      out = StringIO()
+      err = StringIO()
+      with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+         rc = Main(["rename-symbol", str(paths), *args, "--apply"])
+      return rc, out.getvalue(), err.getvalue()
+
+   def TestApplyUpdatesOneFile(self, tmp_path):
+      f = Write(
+         tmp_path / "main.py",
+         Src(
+            """
+            class UserModel:
+               pass
+
+            def Build():
+               return UserModel()
+            """
+         ),
+      )
+
+      rc, out, err = self.RunApply(f, "--name", "UserModel", "--to", "AccountModel")
+
+      assert rc == 0
+      assert err == ""
+      assert out == f"renamed {f}\n"
+      text = f.read_text(encoding="utf-8")
+      assert "class AccountModel:" in text
+      assert "return AccountModel()" in text
+      assert "UserModel" not in text
+
+   def TestApplyUpdatesMultipleFiles(self, tmp_path):
+      pkg = Package(tmp_path)
+      utils = Write(pkg / "utils.py", "def BuildValue():\n   return 1\n")
+      main = Write(
+         pkg / "main.py",
+         Src(
+            """
+            from pkg.utils import BuildValue
+
+            def Run():
+               return BuildValue()
+            """
+         ),
+      )
+
+      rc, out, err = self.RunApply(pkg, "--name", "BuildValue", "--to", "MakeValue")
+
+      assert rc == 0
+      assert err == ""
+      assert f"renamed {main}" in out
+      assert f"renamed {utils}" in out
+      assert "def MakeValue():" in utils.read_text(encoding="utf-8")
+      main_text = main.read_text(encoding="utf-8")
+      assert "from pkg.utils import MakeValue" in main_text
+      assert "return MakeValue()" in main_text
+
+   def TestApplyUsesImportFromBindingEdits(self, tmp_path):
+      pkg = Package(tmp_path)
+      model = Write(pkg / "models.py", "class UserModel:\n   pass\n")
+      main = Write(pkg / "main.py", "from pkg.models import UserModel\n")
+
+      rc, out, err = self.RunApply(pkg, "--name", "UserModel", "--to", "AccountModel")
+
+      assert rc == 0
+      assert err == ""
+      assert f"renamed {model}" in out
+      assert f"renamed {main}" in out
+      assert "class AccountModel:" in model.read_text(encoding="utf-8")
+      assert main.read_text(encoding="utf-8") == "from pkg.models import AccountModel\n"
+
+   def TestApplyHandlesModuleAttributeEdits(self, tmp_path):
+      pkg = Package(tmp_path)
+      Write(pkg / "utils.py", "def BuildValue():\n   return 1\n")
+      main = Write(
+         pkg / "main.py",
+         Src(
+            """
+            import pkg.utils
+
+            def Run():
+               return pkg.utils.BuildValue()
+            """
+         ),
+      )
+
+      rc, _, err = self.RunApply(pkg, "--name", "BuildValue", "--to", "MakeValue")
+
+      assert rc == 0
+      assert err == ""
+      text = main.read_text(encoding="utf-8")
+      assert "import pkg.utils" in text
+      assert "pkg.utils.MakeValue()" in text
+      assert "pkg.MakeValue" not in text
+
+   def TestApplyHandlesAnnotationEdits(self, tmp_path):
+      f = Write(
+         tmp_path / "main.py",
+         Src(
+            """
+            class UserModel:
+               pass
+
+            def Build(user: UserModel) -> UserModel:
+               return user
+            """
+         ),
+      )
+
+      rc, _, err = self.RunApply(f, "--name", "UserModel", "--to", "AccountModel")
+
+      assert rc == 0
+      assert err == ""
+      text = f.read_text(encoding="utf-8")
+      assert "user: AccountModel" in text
+      assert "-> AccountModel" in text
+
+   def TestApplyNoEditsWritesNothingAndPrintsNothing(self, tmp_path, monkeypatch):
+      f = Write(tmp_path / "main.py", "class UserModel:\n   pass\n")
+      original = f.read_text(encoding="utf-8")
+      plan = RenameSymbolPlan(Query={}, Target=None, NewName="AccountModel")
+      monkeypatch.setattr("customfmt.cli.PlanRenameSymbol", lambda *args, **kwargs: (plan, []))
+
+      rc, out, err = self.RunApply(f, "--name", "UserModel", "--to", "AccountModel")
+
+      assert rc == 0
+      assert out == ""
+      assert err == ""
+      assert f.read_text(encoding="utf-8") == original
+
+   def TestApplyDoesNotPrintJson(self, tmp_path):
+      f = Write(tmp_path / "main.py", "class UserModel:\n   pass\n")
+
+      rc, out, err = self.RunApply(f, "--name", "UserModel", "--to", "AccountModel")
+
+      assert rc == 0
+      assert err == ""
+      assert out.startswith("renamed ")
+      assert '"query"' not in out
+      assert '"edits"' not in out
+
+   def TestApplyRejectsDiff(self, tmp_path):
+      f = Write(tmp_path / "main.py", "class UserModel:\n   pass\n")
+      out = StringIO()
+      err = StringIO()
+      with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+         rc = Main([
+            "rename-symbol", str(f), "--name", "UserModel", "--to", "AccountModel",
+            "--apply", "--diff",
+         ])
+
+      assert rc == 2
+      assert out.getvalue() == ""
+      assert "--apply cannot be combined with --diff" in err.getvalue()
+
+   def TestApplyRejectsOutput(self, tmp_path):
+      f = Write(tmp_path / "main.py", "class UserModel:\n   pass\n")
+      out_path = tmp_path / "plan.json"
+      rc, out, err = self.RunApply(
+         f, "--name", "UserModel", "--to", "AccountModel", "--output", str(out_path)
+      )
+
+      assert rc == 2
+      assert out == ""
+      assert "--apply cannot be combined with --output" in err
+      assert not out_path.exists()
+
+   def TestApplyRejectsPretty(self, tmp_path):
+      f = Write(tmp_path / "main.py", "class UserModel:\n   pass\n")
+
+      rc, out, err = self.RunApply(f, "--name", "UserModel", "--to", "AccountModel", "--pretty")
+
+      assert rc == 2
+      assert out == ""
+      assert "--apply cannot be combined with --pretty" in err
+
+   def TestApplyTokenMismatchDoesNotPartiallyModifyFiles(self, tmp_path, monkeypatch):
+      first = Write(tmp_path / "first.py", "class UserModel:\n   pass\n")
+      second = Write(tmp_path / "second.py", "class UserModel:\n   pass\n")
+      first_original = first.read_text(encoding="utf-8")
+      second_original = second.read_text(encoding="utf-8")
+      plan = RenameSymbolPlan(Query={}, Target=None, NewName="AccountModel")
+      plan.Edits.append(
+         RenameSymbolEdit(str(first), 1, 6, "UserModel", "AccountModel", "definition:class")
+      )
+      plan.Edits.append(
+         RenameSymbolEdit(str(second), 1, 6, "OtherModel", "AccountModel", "definition:class")
+      )
+      monkeypatch.setattr("customfmt.cli.PlanRenameSymbol", lambda *args, **kwargs: (plan, []))
+
+      rc, out, err = self.RunApply(tmp_path, "--name", "UserModel", "--to", "AccountModel")
+
+      assert rc == 2
+      assert out == ""
+      assert "expected 'OtherModel'" in err
+      assert first.read_text(encoding="utf-8") == first_original
+      assert second.read_text(encoding="utf-8") == second_original
+
+   def TestApplySkipsDynamicAndUnresolvedReferences(self, tmp_path):
+      f = Write(
+         tmp_path / "main.py",
+         Src(
+            """
+            class UserModel:
+               pass
+
+            def Run(obj):
+               return obj.UserModel()
+
+            from external.pkg import UserModel
+            """
+         ),
+      )
+
+      rc, _, err = self.RunApply(f, "--symbol", f"{f}:2:0", "--to", "AccountModel")
+
+      assert rc == 0
+      assert err == ""
+      text = f.read_text(encoding="utf-8")
+      assert "class AccountModel:" in text
+      assert "return obj.UserModel()" in text
+      assert "from external.pkg import UserModel" in text

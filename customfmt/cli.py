@@ -9,7 +9,7 @@ Commands
   customfmt index   [--pretty] [--output PATH] <paths...>
   customfmt resolve [--pretty] [--output PATH] <paths...>
   customfmt refs [--name NAME | --symbol PATH:LINE:COL] [--pretty] [--output PATH] <paths...>
-  customfmt rename-symbol [--name NAME | --symbol PATH:LINE:COL] --to NAME [--pretty] [--output PATH] [--diff] <paths...>
+  customfmt rename-symbol [--name NAME | --symbol PATH:LINE:COL] --to NAME [--pretty] [--output PATH] [--diff | --apply] <paths...>
 
 Aliases (console_scripts)
 --------------------------
@@ -42,7 +42,7 @@ from customfmt.indexer import IndexPaths
 from customfmt.io import WriteUtf8Lf
 from customfmt.rename_plan import PlanFile
 from customfmt.rename_symbol_plan import PlanRenameSymbol
-from customfmt.rename_symbol_render import RenderPlanDiff
+from customfmt.rename_symbol_render import RenderPlanDiff, RenderPlanTextByFile
 from customfmt.symbols.project_graph import FindRefsByName, FindRefsBySymbol
 from customfmt.symbols.resolver import ResolveFile, ResolveResultSet
 from customfmt.types import Violation
@@ -262,7 +262,7 @@ def _BuildParser(prog: str = "customfmt") -> argparse.ArgumentParser:
       help="Plan a read-only project-wide symbol rename.",
       description=(
          "Walk Python files, find safe project references for one symbol, "
-         "and emit a JSON rename plan or unified diff. Does not modify any files."
+         "and emit JSON, render a unified diff, or apply guarded token edits."
       ),
    )
    sym_p.add_argument(
@@ -303,6 +303,11 @@ def _BuildParser(prog: str = "customfmt") -> argparse.ArgumentParser:
       "--diff",
       action="store_true",
       help="Print a unified diff from the rename plan without writing files.",
+   )
+   sym_p.add_argument(
+      "--apply",
+      action="store_true",
+      help="Apply guarded token edits from the rename plan.",
    )
 
    return parser
@@ -572,8 +577,17 @@ def _CmdRefs(args: argparse.Namespace) -> int:
 def _CmdRenameSymbol(args: argparse.Namespace) -> int:
    import json as _json
 
+   if args.diff and args.apply:
+      print("customfmt: error: --apply cannot be combined with --diff", file=sys.stderr)
+      return 2
    if args.diff and args.output:
       print("customfmt: error: --diff cannot be combined with --output", file=sys.stderr)
+      return 2
+   if args.apply and args.output:
+      print("customfmt: error: --apply cannot be combined with --output", file=sys.stderr)
+      return 2
+   if args.apply and args.pretty:
+      print("customfmt: error: --apply cannot be combined with --pretty", file=sys.stderr)
       return 2
 
    try:
@@ -602,6 +616,22 @@ def _CmdRenameSymbol(args: argparse.Namespace) -> int:
       except (OSError, UnicodeDecodeError, ValueError) as exc:
          print(f"customfmt: error: {exc}", file=sys.stderr)
          return 2
+      return 0
+
+   if args.apply:
+      try:
+         rendered_by_file = RenderPlanTextByFile(plan)
+      except (OSError, UnicodeDecodeError, ValueError) as exc:
+         print(f"customfmt: error: {exc}", file=sys.stderr)
+         return 2
+      try:
+         for path, rewritten in rendered_by_file.items():
+            WriteUtf8Lf(path, rewritten)
+      except OSError as exc:
+         print(f"customfmt: error writing renamed file: {exc}", file=sys.stderr)
+         return 2
+      for path in rendered_by_file:
+         print(f"renamed {path}")
       return 0
 
    indent = 2 if args.pretty else None
