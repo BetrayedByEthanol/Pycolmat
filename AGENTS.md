@@ -307,7 +307,24 @@ Each JSON reference result must clearly report one confidence value:
 * `unresolved`
 * `dynamic`
 
-Do not connect `customfmt refs` to the rename planner yet.
+`customfmt rename-symbol` may consume `customfmt refs` results to build a
+read-only JSON rename plan. It must not connect to the local `customfmt rename`
+applier, and it must not apply edits or emit diffs.
+
+## Project-wide rename-symbol planning rules
+
+`customfmt rename-symbol` is read-only. It may consume `customfmt refs` project
+reference results and emit JSON token edit plans, but it must not write source
+files, produce diffs, or apply edits. Keep implementation separate from the
+resolver and from `symbols/project_graph.py`; the project graph remains
+read-only reference discovery.
+
+Supported v1 targets are class definitions, function definitions, module-level
+declarations, safely resolved `from module import Name` bindings, and safely
+resolved imported module attribute references. Do not support local variables
+(use `customfmt rename`), methods, instance attributes, class attributes,
+dynamic refs, unresolved refs, relative imports, wildcard imports, string refs,
+`getattr()`, `globals()`, or `importlib` patterns.
 
 ---
 
