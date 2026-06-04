@@ -22,6 +22,14 @@ check-format customfmt/ tests/
 pytest
 ```
 
+If the editable install cannot complete because the environment cannot fetch build dependencies or console scripts are unavailable, use the repository root on `PYTHONPATH` and invoke the CLI entry-point wrappers directly instead:
+
+```bash
+PYTHONPATH=. python -c 'from customfmt.cli import MainFix; raise SystemExit(MainFix(["customfmt/", "tests/"]))'
+PYTHONPATH=. python -c 'from customfmt.cli import MainCheck; raise SystemExit(MainCheck(["customfmt/", "tests/"]))'
+PYTHONPATH=. pytest
+```
+
 For verification-only CI behavior, run:
 
 ```bash
@@ -29,6 +37,15 @@ ruff check customfmt/ tests/
 try-auto-format --check customfmt/ tests/
 check-format customfmt/ tests/
 pytest
+```
+
+If console scripts are unavailable, the verification-only fallback is:
+
+```bash
+ruff check customfmt/ tests/
+PYTHONPATH=. python -c 'from customfmt.cli import MainFix; raise SystemExit(MainFix(["--check", "customfmt/", "tests/"]))'
+PYTHONPATH=. python -c 'from customfmt.cli import MainCheck; raise SystemExit(MainCheck(["customfmt/", "tests/"]))'
+PYTHONPATH=. pytest
 ```
 
 If changing resolver, indexer, or rename-planner behavior, also inspect JSON output manually when useful:

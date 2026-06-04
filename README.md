@@ -241,9 +241,13 @@ customfmt rename-symbol src/ --name UserModel --to AccountModel --diff
 `customfmt rename-symbol` emits JSON by default, pretty JSON with `--pretty`,
 writes JSON with `--output PATH`, and renders a read-only unified diff with
 `--diff`. When `--diff` is used, JSON is not printed and source files are not
-modified. The command uses `customfmt refs` project reference results as its
-source of truth, then reports or renders exact token edit sites that a future
-applier could use. If `--name` matches
+modified. Diff mode is read-only, so it renders proposed token edits to stdout
+without applying them to source files. `--diff` cannot be combined with
+`--output`; that incompatible option pair exits with code 2 before writing any
+output file. `--pretty` only affects JSON output and is ignored in diff mode.
+The command uses `customfmt refs` project reference results as its source of
+truth, then reports or renders exact token edit sites that a future applier
+could use. If `--name` matches
 multiple supported definitions, the command returns an ambiguity error and
 requires `--symbol PATH:LINE:COL`.
 

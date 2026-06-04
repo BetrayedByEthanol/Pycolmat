@@ -297,6 +297,55 @@ class TestRenameSymbolDiff:
       assert "+   return AccountModel()" in out
       assert f.read_text(encoding="utf-8") == original
 
+   def TestDiffOutputIsRejectedAndDoesNotWriteFile(self, tmp_path):
+      f = Write(tmp_path / "main.py", "class UserModel:\n   pass\n")
+      out_path = tmp_path / "rename.diff"
+
+      rc, out, err = self.RunDiff(
+         f, "--name", "UserModel", "--to", "AccountModel", "--output", str(out_path)
+      )
+
+      assert rc == 2
+      assert out == ""
+      assert "--diff cannot be combined with --output" in err
+      assert not out_path.exists()
+
+   def TestDiffPrettySucceedsWithNormalDiff(self, tmp_path):
+      f = Write(tmp_path / "main.py", "class UserModel:\n   pass\n")
+
+      rc, out, err = self.RunDiff(f, "--name", "UserModel", "--to", "AccountModel", "--pretty")
+
+      assert rc == 0
+      assert err == ""
+      assert "--- a/" in out
+      assert "+class AccountModel:" in out
+      assert '"query"' not in out
+
+   def TestDiffPreservesAlignedClassBodySpacing(self, tmp_path):
+      original = Src(
+         """
+         class UserModel:
+            ID          : int
+            Name        : str = ""
+            Description : str
+            Enabled           = True
+
+         def Build():
+            return UserModel()
+         """
+      )
+      f = Write(tmp_path / "main.py", original)
+
+      rc, out, _ = self.RunDiff(f, "--name", "UserModel", "--to", "AccountModel")
+
+      assert rc == 0
+      assert "+class AccountModel:" in out
+      assert " ID          : int" in out
+      assert " Name        : str = \"\"" in out
+      assert " Description : str" in out
+      assert " Enabled           = True" in out
+      assert f.read_text(encoding="utf-8") == original
+
    def TestClassRenameDiffIncludesDefinitionAndConstructorCall(self, tmp_path):
       f = Write(
          tmp_path / "main.py",
