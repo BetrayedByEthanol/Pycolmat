@@ -205,10 +205,10 @@ files when the target module is present in the scanned paths:
 - `from . import module`
 - `from .. import module`
 
-Relative imports are resolved from the importing file's package context only
-when the target module exists unambiguously inside the scanned paths. Relative
-imports that point outside scanned paths, beyond the package root, or to
-ambiguous module names remain `unresolved` with a reason. Imported module
+Relative imports are supported when they resolve inside scanned regular
+packages. Relative imports that point outside scanned paths, go beyond the
+package root, resolve through namespace-package cases, are ambiguous, or miss
+their target remain `unresolved` with a reason. Imported module
 attribute calls such as `module.Foo()` may be reported as `import_resolved` when
 `module` is a supported local import and `Foo` is found in the imported module.
 Arbitrary attribute and dynamic patterns remain dynamic or unresolved rather
@@ -311,7 +311,7 @@ Supported v1 rename sites are conservative:
 | `from module import Name` | Supported | Renames the imported binding when the import resolves to the selected local project symbol. |
 | `from module import Name as Alias` | Supported alias behavior | Renaming the original target edits the exported definition but does not rewrite `Alias`; selecting the alias symbol can rename the alias binding and its safe alias references. |
 | `import module; module.Function()` | Supported | Renames only the final attribute token when the module import resolves safely. |
-| Safe relative imports | Supported | `from .module import Name`, `from ..package.module import Name`, `from . import module`, and `from .. import module` resolve only when the target module exists unambiguously in scanned paths. |
+| Safe relative imports | Supported | `from .module import Name`, `from ..package.module import Name`, `from . import module`, and `from .. import module` resolve only when the target module exists unambiguously inside scanned regular packages. |
 | Annotations | Supported | Safe resolved annotation name tokens are planned. |
 | Constructor and call references | Supported | Safe resolved call tokens such as `UserModel()` and `BuildValue()` are planned. |
 
@@ -327,7 +327,7 @@ unresolved, or dynamic when detected:
 | `self.X` | Unsupported | Treated as dynamic/attribute-based. |
 | `obj.Method()` | Unsupported | Dynamic attribute calls are not guessed. |
 | Wildcard imports | Unsupported | `from module import *` references stay unresolved for rename purposes. |
-| Unresolved relative imports | Unsupported | Relative imports outside scanned paths, beyond the package root, ambiguous, or missing their target stay unresolved and block apply by default. |
+| Unresolved relative imports | Unsupported | Relative imports outside scanned paths, beyond the package root, namespace-package cases, ambiguous imports, or missing targets stay unresolved and block apply by default. |
 | String references | Unsupported | Strings are never rewritten. |
 | `getattr` / `globals` / `importlib` / `eval` / `exec` | Unsupported | Dynamic patterns are skipped or left unresolved rather than guessed. |
 | Unresolved external imports | Unsupported | External imports that cannot be safely resolved are blocked by default in apply mode. |
