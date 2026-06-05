@@ -234,10 +234,10 @@ class TestRenameSymbolPlan:
       assert data == {}
       assert "supported project symbol" in err
 
-   def TestRelativeImportStaysUnresolvedInPlan(self, tmp_path):
+   def TestRelativeImportBindingIsPlannedWhenResolved(self, tmp_path):
       pkg = Package(tmp_path)
       Write(pkg / "models.py", "class UserModel:\n   pass\n")
-      Write(
+      main = Write(
          pkg / "main.py",
          Src(
             '''
@@ -250,11 +250,36 @@ class TestRenameSymbolPlan:
       )
 
       rc, data, _ = RunPlan(pkg, "--name", "UserModel", "--to", "AccountModel")
-      reasons = [item["reason"] for item in data["skipped"]]
+      import_edits = [
+         e for e in data["edits"]
+         if e["file"] == str(main) and e["kind"] == "definition:import_from"
+      ]
 
       assert rc == 0
-      assert "import_not_safely_resolved" in reasons
-      assert any(item["kind"] == "import_from" for item in data["skipped"])
+      assert import_edits
+      assert import_edits[0]["old"] == "UserModel"
+      assert not data["unresolved_references"]
+
+   def TestUnresolvedRelativeImportStaysUnresolvedInPlan(self, tmp_path):
+      pkg = Package(tmp_path)
+      Write(pkg / "models.py", "class UserModel:\n   pass\n")
+      Write(
+         pkg / "main.py",
+         Src(
+            '''
+            from .missing import UserModel
+
+            def Build():
+               return UserModel()
+            '''
+         ),
+      )
+
+      rc, data, _ = RunPlan(pkg, "--name", "UserModel", "--to", "AccountModel")
+      reasons = [item["reason"] for item in data["unresolved_references"]]
+
+      assert rc == 0
+      assert "unresolved" in reasons
 
    def TestWildcardImportReferenceStaysUnresolvedInPlan(self, tmp_path):
       pkg = Package(tmp_path)
@@ -497,6 +522,17 @@ class TestRenameSymbolDiff:
       assert "-from pkg.models import UserModel" in out
       assert "+from pkg.models import AccountModel" in out
 
+   def TestRelativeImportFromBindingDiff(self, tmp_path):
+      pkg = Package(tmp_path)
+      Write(pkg / "models.py", "class UserModel:\n   pass\n")
+      Write(pkg / "main.py", "from .models import UserModel\n")
+
+      rc, out, _ = self.RunDiff(pkg, "--name", "UserModel", "--to", "AccountModel")
+
+      assert rc == 0
+      assert "-from .models import UserModel" in out
+      assert "+from .models import AccountModel" in out
+
    def TestModuleAttributeDiffEditsOnlyAttributeToken(self, tmp_path):
       pkg = Package(tmp_path)
       Write(pkg / "utils.py", "def BuildValue():\n   return 1\n")
@@ -635,6 +671,20 @@ class TestRenameSymbolApply:
       assert f"renamed {main}" in out
       assert "class AccountModel:" in model.read_text(encoding="utf-8")
       assert main.read_text(encoding="utf-8") == "from pkg.models import AccountModel\n"
+
+   def TestApplyUsesRelativeImportFromBindingEdits(self, tmp_path):
+      pkg = Package(tmp_path)
+      model = Write(pkg / "models.py", "class UserModel:\n   pass\n")
+      main = Write(pkg / "main.py", "from .models import UserModel\n")
+
+      rc, out, err = self.RunApply(pkg, "--name", "UserModel", "--to", "AccountModel")
+
+      assert rc == 0
+      assert err == ""
+      assert f"renamed {model}" in out
+      assert f"renamed {main}" in out
+      assert "class AccountModel:" in model.read_text(encoding="utf-8")
+      assert main.read_text(encoding="utf-8") == "from .models import AccountModel\n"
 
    def TestApplyHandlesModuleAttributeEdits(self, tmp_path):
       pkg = Package(tmp_path)
@@ -898,27 +948,71 @@ class TestRenameSymbolApply:
 
       assert rc == 0
       assert err == ""
-      assert "class AccountModel:" in f.read_text(encoding="utf-8")
 
-   def TestApplyRejectsRelativeImportAndWritesNothing(self, tmp_path):
+
+   def TestApplyRejectsUnresolvedRelativeImportAndWritesNothing(self, tmp_path):
       pkg = Package(tmp_path)
-      Write(pkg / "models.py", "class UserModel:\n   pass\n")
-      main_original = Src(
-         '''
-         from .models import UserModel
+      model = Write(pkg / "models.py", "class UserModel:\n   pass\n")
+      main = Write(
+         pkg / "main.py",
+         Src(
+            '''
+            from .missing import UserModel
 
-         def Build():
-            return UserModel()
-         '''
+            def Build():
+               return UserModel()
+            '''
+         ),
       )
-      main = Write(pkg / "main.py", main_original)
+      model_original = model.read_text(encoding="utf-8")
+      main_original = main.read_text(encoding="utf-8")
 
       rc, out, err = self.RunApply(pkg, "--name", "UserModel", "--to", "AccountModel")
 
       assert rc == 2
       assert out == ""
-      assert "skipped reference(s)" in err
+      assert "unresolved reference(s)" in err
+      assert model.read_text(encoding="utf-8") == model_original
       assert main.read_text(encoding="utf-8") == main_original
+
+   def TestApplyAllowIncompleteWithUnresolvedRelativeImportEditsSafeSites(self, tmp_path):
+      pkg = Package(tmp_path)
+      model = Write(pkg / "models.py", "class UserModel:\n   pass\n")
+      main = Write(
+         pkg / "main.py",
+         Src(
+            '''
+            from .missing import UserModel
+
+            def Build():
+               return UserModel()
+            '''
+         ),
+      )
+
+      rc, _, err = self.RunApply(
+         pkg, "--name", "UserModel", "--to", "AccountModel", "--allow-incomplete"
+      )
+
+      assert rc == 0
+      assert err == ""
+      assert "class AccountModel:" in model.read_text(encoding="utf-8")
+      assert "from .missing import UserModel" in main.read_text(encoding="utf-8")
+      assert "return UserModel()" in main.read_text(encoding="utf-8")
+
+   def TestApplyResolvedRelativeImportUpdatesFiles(self, tmp_path):
+      pkg = Package(tmp_path)
+      model = Write(pkg / "models.py", "class UserModel:\n   pass\n")
+      main = Write(pkg / "main.py", "from .models import UserModel\n")
+
+      rc, out, err = self.RunApply(pkg, "--name", "UserModel", "--to", "AccountModel")
+
+      assert rc == 0
+      assert err == ""
+      assert f"renamed {model}" in out
+      assert f"renamed {main}" in out
+      assert "class AccountModel:" in model.read_text(encoding="utf-8")
+      assert main.read_text(encoding="utf-8") == "from .models import AccountModel\n"
 
    def TestApplyRejectsWildcardImportAndWritesNothing(self, tmp_path):
       pkg = Package(tmp_path)

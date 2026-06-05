@@ -359,9 +359,9 @@ class TestProjectRefs:
       assert str(models) in definition_files
       assert any(r["resolved_to"]["file"] == str(models) for r in data["references"])
 
-   def TestRelativeImportMarkedUnresolved(self, tmp_path):
+   def TestSamePackageRelativeImportResolves(self, tmp_path):
       pkg = Package(tmp_path)
-      Write(pkg / "models.py", "class UserModel:\n   pass\n")
+      models = Write(pkg / "models.py", "class UserModel:\n   pass\n")
       Write(
          pkg / "main.py",
          Src(
@@ -378,8 +378,101 @@ class TestProjectRefs:
       data = result.ToDict()
       refs = [r for r in data["references"] if r["name"] == "UserModel"]
 
+      assert refs[0]["confidence"] == "import_resolved"
+      assert refs[0]["resolved_to"]["file"] == str(models)
+
+   def TestParentPackageRelativeImportResolves(self, tmp_path):
+      pkg = Package(tmp_path)
+      sub = pkg / "sub"
+      Write(sub / "__init__.py", "")
+      models = Write(pkg / "models.py", "class UserModel:\n   pass\n")
+      Write(
+         sub / "main.py",
+         Src(
+            """
+            from ..models import UserModel
+
+            def Build():
+               return UserModel()
+            """
+         ),
+      )
+
+      result, _ = FindRefsByName([str(pkg)], "UserModel")
+      data = result.ToDict()
+      refs = [r for r in data["references"] if r["name"] == "UserModel"]
+
+      assert refs[0]["confidence"] == "import_resolved"
+      assert refs[0]["resolved_to"]["file"] == str(models)
+
+   def TestRelativeImportModuleAttributeResolves(self, tmp_path):
+      pkg = Package(tmp_path)
+      utils = Write(pkg / "utils.py", "def BuildValue():\n   return 1\n")
+      Write(
+         pkg / "main.py",
+         Src(
+            """
+            from . import utils
+
+            def Run():
+               return utils.BuildValue()
+            """
+         ),
+      )
+
+      result, _ = FindRefsByName([str(pkg)], "BuildValue")
+      data = result.ToDict()
+      refs = [r for r in data["references"] if r["name"] == "BuildValue"]
+
+      assert refs
+      assert refs[0]["confidence"] == "import_resolved"
+      assert refs[0]["resolved_to"]["file"] == str(utils)
+
+   def TestParentRelativeImportModuleAttributeResolves(self, tmp_path):
+      pkg = Package(tmp_path)
+      sub = pkg / "sub"
+      Write(sub / "__init__.py", "")
+      utils = Write(pkg / "utils.py", "def BuildValue():\n   return 1\n")
+      Write(
+         sub / "main.py",
+         Src(
+            """
+            from .. import utils
+
+            def Run():
+               return utils.BuildValue()
+            """
+         ),
+      )
+
+      result, _ = FindRefsByName([str(pkg)], "BuildValue")
+      data = result.ToDict()
+      refs = [r for r in data["references"] if r["name"] == "BuildValue"]
+
+      assert refs
+      assert refs[0]["confidence"] == "import_resolved"
+      assert refs[0]["resolved_to"]["file"] == str(utils)
+
+   def TestUnresolvedRelativeImportStaysUnresolved(self, tmp_path):
+      pkg = Package(tmp_path)
+      Write(
+         pkg / "main.py",
+         Src(
+            """
+            from .missing import UserModel
+
+            def Build():
+               return UserModel()
+            """
+         ),
+      )
+
+      result, _ = FindRefsByName([str(pkg)], "UserModel")
+      data = result.ToDict()
+      refs = [r for r in data["references"] if r["name"] == "UserModel"]
+
       assert refs[0]["confidence"] == "unresolved"
-      assert refs[0]["extra"]["import_target"]["reason"] == "relative_import_unresolved"
+      assert refs[0]["extra"]["import_target"]["reason"] == "module_not_found"
 
    def TestPrettyOutputIsIndentedJson(self, tmp_path, capsys):
       f = Write(tmp_path / "main.py", "def Build():\n   return 1\n")
