@@ -260,6 +260,29 @@ class TestRenameSymbolPlan:
       assert import_edits[0]["old"] == "UserModel"
       assert not data["unresolved_references"]
 
+   def TestRelativeModuleImportAttributeIsPlannedWhenResolved(self, tmp_path):
+      pkg = Package(tmp_path)
+      utils = Write(pkg / "utils.py", "def BuildValue():\n   return 1\n")
+      main = Write(
+         pkg / "main.py",
+         Src(
+            '''
+            from . import utils
+
+            def Run():
+               return utils.BuildValue()
+            '''
+         ),
+      )
+
+      rc, data, _ = RunPlan(pkg, "--name", "BuildValue", "--to", "MakeValue")
+      main_edits = [e for e in data["edits"] if e["file"] == str(main)]
+
+      assert rc == 0
+      assert any(e["old"] == "BuildValue" for e in main_edits)
+      assert any(e["file"] == str(utils) for e in data["edits"])
+      assert not data["unresolved_references"]
+
    def TestUnresolvedRelativeImportStaysUnresolvedInPlan(self, tmp_path):
       pkg = Package(tmp_path)
       Write(pkg / "models.py", "class UserModel:\n   pass\n")
@@ -532,6 +555,28 @@ class TestRenameSymbolDiff:
       assert rc == 0
       assert "-from .models import UserModel" in out
       assert "+from .models import AccountModel" in out
+
+   def TestRelativeModuleImportAttributeDiff(self, tmp_path):
+      pkg = Package(tmp_path)
+      Write(pkg / "utils.py", "def BuildValue():\n   return 1\n")
+      Write(
+         pkg / "main.py",
+         Src(
+            """
+            from . import utils
+
+            def Run():
+               return utils.BuildValue()
+            """
+         ),
+      )
+
+      rc, out, _ = self.RunDiff(pkg, "--name", "BuildValue", "--to", "MakeValue")
+
+      assert rc == 0
+      assert "def MakeValue():" in out
+      assert "from . import utils" in out
+      assert "utils.MakeValue()" in out
 
    def TestModuleAttributeDiffEditsOnlyAttributeToken(self, tmp_path):
       pkg = Package(tmp_path)
@@ -1013,6 +1058,34 @@ class TestRenameSymbolApply:
       assert f"renamed {main}" in out
       assert "class AccountModel:" in model.read_text(encoding="utf-8")
       assert main.read_text(encoding="utf-8") == "from .models import AccountModel\n"
+
+   def TestApplyParentRelativeModuleImportAttributeUpdatesFiles(self, tmp_path):
+      pkg = Package(tmp_path)
+      sub = pkg / "sub"
+      Write(sub / "__init__.py", "")
+      utils = Write(pkg / "utils.py", "def BuildValue():\n   return 1\n")
+      main = Write(
+         sub / "main.py",
+         Src(
+            '''
+            from .. import utils
+
+            def Run():
+               return utils.BuildValue()
+            '''
+         ),
+      )
+
+      rc, out, err = self.RunApply(pkg, "--name", "BuildValue", "--to", "MakeValue")
+
+      assert rc == 0
+      assert err == ""
+      assert f"renamed {utils}" in out
+      assert f"renamed {main}" in out
+      assert "def MakeValue():" in utils.read_text(encoding="utf-8")
+      main_text = main.read_text(encoding="utf-8")
+      assert "from .. import utils" in main_text
+      assert "return utils.MakeValue()" in main_text
 
    def TestApplyRejectsWildcardImportAndWritesNothing(self, tmp_path):
       pkg = Package(tmp_path)
