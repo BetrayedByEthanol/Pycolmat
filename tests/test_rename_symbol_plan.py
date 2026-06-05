@@ -548,13 +548,27 @@ class TestRenameSymbolDiff:
    def TestRelativeImportFromBindingDiff(self, tmp_path):
       pkg = Package(tmp_path)
       Write(pkg / "models.py", "class UserModel:\n   pass\n")
-      Write(pkg / "main.py", "from .models import UserModel\n")
+      main = Write(
+         pkg / "main.py",
+         Src(
+            """
+            from .models import UserModel
+
+            def Build():
+               return UserModel()
+            """
+         ),
+      )
+      main_original = main.read_text(encoding="utf-8")
 
       rc, out, _ = self.RunDiff(pkg, "--name", "UserModel", "--to", "AccountModel")
 
       assert rc == 0
       assert "-from .models import UserModel" in out
       assert "+from .models import AccountModel" in out
+      assert "-   return UserModel()" in out
+      assert "+   return AccountModel()" in out
+      assert main.read_text(encoding="utf-8") == main_original
 
    def TestRelativeModuleImportAttributeDiff(self, tmp_path):
       pkg = Package(tmp_path)
@@ -1048,7 +1062,17 @@ class TestRenameSymbolApply:
    def TestApplyResolvedRelativeImportUpdatesFiles(self, tmp_path):
       pkg = Package(tmp_path)
       model = Write(pkg / "models.py", "class UserModel:\n   pass\n")
-      main = Write(pkg / "main.py", "from .models import UserModel\n")
+      main = Write(
+         pkg / "main.py",
+         Src(
+            """
+            from .models import UserModel
+
+            def Build():
+               return UserModel()
+            """
+         ),
+      )
 
       rc, out, err = self.RunApply(pkg, "--name", "UserModel", "--to", "AccountModel")
 
@@ -1057,7 +1081,10 @@ class TestRenameSymbolApply:
       assert f"renamed {model}" in out
       assert f"renamed {main}" in out
       assert "class AccountModel:" in model.read_text(encoding="utf-8")
-      assert main.read_text(encoding="utf-8") == "from .models import AccountModel\n"
+      main_text = main.read_text(encoding="utf-8")
+      assert "from .models import AccountModel" in main_text
+      assert "return AccountModel()" in main_text
+      assert "UserModel" not in main_text
 
    def TestApplyParentRelativeModuleImportAttributeUpdatesFiles(self, tmp_path):
       pkg = Package(tmp_path)
