@@ -28,8 +28,8 @@ jobs:
       - name: Install tools
         run: |
           python -m pip install --upgrade pip
-          pip install ruff
-          pip install .
+          python -m pip install ruff
+          python -m pip install -e .
 
       - name: Ruff – lint
         run: ruff check customfmt/ tests/
@@ -37,7 +37,7 @@ jobs:
       - name: customfmt – auto-format check
         run: try-auto-format --check customfmt/ tests/
 
-      - name: customfmt – style check (CF001–CF010)
+      - name: customfmt – style check
         run: check-format customfmt/ tests/
 
   # -------------------------------------------------------------------------
@@ -64,18 +64,18 @@ jobs:
       - name: Install package and test dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install . pytest pytest-cov
+          python -m pip install -e . pytest pytest-cov
 
       - name: Run tests with coverage
         run: pytest --cov=customfmt --cov-report=term-missing
 
   # -------------------------------------------------------------------------
-  # customfmt self-check: the tool must pass its own rules
+  # Smoke checks for index, resolver, references, and rename planning
   # -------------------------------------------------------------------------
-  selfcheck:
-    name: customfmt self-check
+  smoke:
+    name: Smoke checks
     runs-on: ubuntu-latest
-    needs: lint
+    needs: test
 
     steps:
       - uses: actions/checkout@v4
@@ -86,10 +86,18 @@ jobs:
           python-version: "3.11"
 
       - name: Install customfmt
-        run: pip install .
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
 
-      - name: Auto-format check (customfmt source)
-        run: try-auto-format --check customfmt/ tests/
+      - name: Create index
+        run: create-index customfmt/ --pretty
 
-      - name: Style check (customfmt source)
-        run: check-format customfmt/ tests/
+      - name: Resolve index
+        run: resolve-index customfmt/ --pretty
+
+      - name: Project refs smoke
+        run: customfmt refs customfmt/ --name ResolveFile --pretty
+
+      - name: Rename-symbol diff smoke
+        run: customfmt rename-symbol customfmt/ --name ResolveFile --to ResolvePath --diff

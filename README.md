@@ -468,23 +468,124 @@ class UserModel:
 
 ### Local developer workflow
 
+For this repository, run the project formatter/checker rather than generic
+Ruff formatting. The formatter owns alignment and the custom naming rules.
+
 ```bash
-ruff check --fix src/
-ruff format src/
-try-auto-format src/
-check-format src/
-pyright
+python -m pip install -e .
+ruff check customfmt/ tests/
+try-auto-format customfmt/ tests/
+check-format customfmt/ tests/
+pytest
 ```
 
 ### CI workflow (read-only checks)
 
+The release CI keeps linting, test coverage, and read-only smoke checks
+separate. The smoke commands exercise indexing, resolving, reference lookup,
+and rename planning without applying edits.
+
 ```bash
-ruff check src/
-ruff format --check src/
-try-auto-format --check src/
-check-format src/
-pyright
+python -m pip install -e .
+ruff check customfmt/ tests/
+try-auto-format --check customfmt/ tests/
+check-format customfmt/ tests/
+pytest --cov=customfmt --cov-report=term-missing
+create-index customfmt/ --pretty
+resolve-index customfmt/ --pretty
+customfmt refs customfmt/ --name ResolveFile --pretty
+customfmt rename-symbol customfmt/ --name ResolveFile --to ResolvePath --diff
 ```
+
+### Gitea Actions example
+
+```yaml
+# .gitea/workflows/ci.yaml
+name: CI
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install tools
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install ruff
+          python -m pip install -e .
+
+      - name: Ruff lint
+        run: ruff check customfmt/ tests/
+
+      - name: customfmt format check
+        run: try-auto-format --check customfmt/ tests/
+
+      - name: customfmt style check
+        run: check-format customfmt/ tests/
+```
+
+### GitHub Actions example
+
+```yaml
+# .github/workflows/ci.yaml
+name: CI
+on: [push, pull_request]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: |
+          python -m pip install --upgrade pip
+          python -m pip install ruff
+          python -m pip install -e .
+      - run: ruff check customfmt/ tests/
+      - run: try-auto-format --check customfmt/ tests/
+      - run: check-format customfmt/ tests/
+
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "${{ matrix.python-version }}" }
+      - run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e . pytest pytest-cov
+      - run: pytest --cov=customfmt --cov-report=term-missing
+
+  smoke:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+      - run: create-index customfmt/ --pretty
+      - run: resolve-index customfmt/ --pretty
+      - run: customfmt refs customfmt/ --name ResolveFile --pretty
+      - run: customfmt rename-symbol customfmt/ --name ResolveFile --to ResolvePath --diff
+```
+
+---
 
 ### `--ignore` — suppress specific rules
 
@@ -521,71 +622,6 @@ and `check-format`. It is **not** available on `customfmt rename` or
 
 In fix write mode, ignored fix rules are also skipped (the transformation is
 not applied), not just suppressed in output.
-
----
-
-### Gitea Actions example
-
-```yaml
-# .gitea/workflows/ci.yaml
-name: CI
-on:
-  push:
-    branches: ["**"]
-  pull_request:
-    branches: ["**"]
-
-jobs:
-  lint:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install tools
-        run: |
-          pip install ruff pyright
-          pip install tools/customfmt/
-
-      - name: Ruff lint
-        run: ruff check src/
-
-      - name: Ruff format check
-        run: ruff format --check src/
-
-      - name: customfmt format check
-        run: try-auto-format --check src/
-
-      - name: customfmt style check
-        run: check-format src/
-
-      - name: Pyright
-        run: pyright
-```
-
-### GitHub Actions example
-
-```yaml
-# .github/workflows/ci.yaml
-name: CI
-on: [push, pull_request]
-
-jobs:
-  lint:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: { python-version: "3.11" }
-      - run: pip install ruff pyright && pip install tools/customfmt/
-      - run: ruff check src/
-      - run: ruff format --check src/
-      - run: try-auto-format --check src/
-      - run: check-format src/
-      - run: pyright
-```
 
 ---
 
