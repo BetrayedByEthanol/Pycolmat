@@ -206,9 +206,11 @@ files when the target module is present in the scanned paths:
 - `from .. import module`
 
 Relative imports are supported when they resolve inside scanned regular
-packages. Relative imports that point outside scanned paths, go beyond the
-package root, resolve through namespace-package cases, are ambiguous, or miss
-their target remain `unresolved` with a reason. Imported module
+packages. Namespace packages, missing modules, ambiguous modules, and imports
+outside scanned paths remain unresolved and block apply by default. Relative
+imports that point outside scanned paths, go beyond the package root, resolve
+through namespace-package cases, are ambiguous, or miss their target remain
+`unresolved` with a reason. Imported module
 attribute calls such as `module.Foo()` may be reported as `import_resolved` when
 `module` is a supported local import and `Foo` is found in the imported module.
 Arbitrary attribute and dynamic patterns remain dynamic or unresolved rather
