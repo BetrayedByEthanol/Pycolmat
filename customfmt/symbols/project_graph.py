@@ -143,9 +143,10 @@ class ProjectGraph:
    def __init__(self, results: list[ResolveResult], errors: list[FileError]) -> None:
       self.Results = results
       self.Errors  = errors
-      self._ModuleMap    : dict[str, ResolveResult] = {}
-      self._ModuleDefs   : dict[tuple[str, str], Definition] = {}
-      self._ImportCache  : dict[_SymbolLocation, _ImportTarget] = {}
+      self._ModuleMap        : dict[str, ResolveResult] = {}
+      self._AmbiguousModules : set[str]                  = set()
+      self._ModuleDefs       : dict[tuple[str, str], Definition] = {}
+      self._ImportCache      : dict[_SymbolLocation, _ImportTarget] = {}
       self._BuildModuleMap()
       self._BuildModuleDefs()
 
@@ -157,7 +158,11 @@ class ProjectGraph:
       paths = [Path(r.FilePath) for r in self.Results]
       for result in self.Results:
          for name in _ModuleCandidates(Path(result.FilePath), paths):
-            self._ModuleMap.setdefault(name, result)
+            existing = self._ModuleMap.get(name)
+            if existing is None:
+               self._ModuleMap[name] = result
+            elif not _SamePath(existing.FilePath, result.FilePath):
+               self._AmbiguousModules.add(name)
 
    def _BuildModuleDefs(self) -> None:
       export_kinds = {
@@ -166,6 +171,8 @@ class ProjectGraph:
          DefKind.ModuleDecl,
       }
       for module_name, result in self._ModuleMap.items():
+         if module_name in self._AmbiguousModules:
+            continue
          for defn in result.Definitions:
             if defn.ScopeRef.Parent is None and defn.Kind in export_kinds:
                key = (module_name, defn.Name)
@@ -364,13 +371,13 @@ class ProjectGraph:
       base_name = full.split(".", 1)[0]
       prefix = full.rsplit(".", 1)[0]
       defn = ref.ScopeRef.ResolveName(base_name)
-      if defn is None or defn.Kind != DefKind.Import:
+      if defn is None or defn.Kind not in (DefKind.Import, DefKind.ImportFrom):
          return None
       module = str(defn.Extra.get("module", ""))
-      if prefix not in (defn.Name, module):
-         return None
       import_target = self._ResolveImportDefinition(defn)
       if import_target.Confidence != CONF_IMPORT_RESOLVED:
+         return None
+      if prefix not in (defn.Name, module, import_target.Module):
          return None
       target = self._ModuleDefs.get((import_target.Module, ref.Name))
       if target is None:
@@ -400,14 +407,30 @@ class ProjectGraph:
 
    def _ResolveImportFrom(self, defn: Definition) -> _ImportTarget:
       extra = defn.Extra
-      if extra.get("level", 0):
-         return _ImportTarget(
-            Confidence=CONF_UNRESOLVED,
-            Module=str(extra.get("module", "")),
-            Reason="relative_import_unresolved",
-         )
       module = str(extra.get("module", ""))
       name = str(extra.get("name", defn.Name))
+      level = int(extra.get("level", 0) or 0)
+      if level:
+         if module:
+            module_target = self._ResolveRelativeModuleName(defn, level, module)
+            if module_target.Confidence != CONF_IMPORT_RESOLVED:
+               return module_target
+            module = module_target.Module
+         else:
+            module_target = self._ResolveRelativeModuleName(defn, level, name)
+            if module_target.Confidence == CONF_IMPORT_RESOLVED:
+               return module_target
+            package_target = self._ResolveRelativeModuleName(defn, level, "")
+            if package_target.Confidence != CONF_IMPORT_RESOLVED:
+               return package_target
+            module = package_target.Module
+      elif not module:
+         return _ImportTarget(
+            Confidence=CONF_UNRESOLVED,
+            Module=module,
+            Reason="module_not_found",
+         )
+
       target = self._ModuleDefs.get((module, name))
       if target is None:
          return _ImportTarget(
@@ -419,10 +442,20 @@ class ProjectGraph:
          Confidence=CONF_IMPORT_RESOLVED,
          Target=target,
          Module=module,
+         Reason="module_name_found",
       )
 
    def _ResolveImport(self, defn: Definition) -> _ImportTarget:
       module = str(defn.Extra.get("module", ""))
+      return self._ResolveAbsoluteModuleName(module)
+
+   def _ResolveAbsoluteModuleName(self, module: str) -> _ImportTarget:
+      if module in self._AmbiguousModules:
+         return _ImportTarget(
+            Confidence=CONF_UNRESOLVED,
+            Module=module,
+            Reason="module_ambiguous",
+         )
       if module in self._ModuleMap:
          return _ImportTarget(
             Confidence=CONF_IMPORT_RESOLVED,
@@ -434,6 +467,44 @@ class ProjectGraph:
          Module=module,
          Reason="module_not_found",
       )
+
+   def _ResolveRelativeModuleName(
+      self, defn: Definition, level: int, module: str
+   ) -> _ImportTarget:
+      package = self._ImporterPackage(defn.ScopeRef.FilePath)
+      if package is None:
+         return _ImportTarget(
+            Confidence=CONF_UNRESOLVED,
+            Module=module,
+            Reason="relative_import_outside_package",
+         )
+      package_parts = package.split(".") if package else []
+      up_count = level - 1
+      if up_count > len(package_parts):
+         return _ImportTarget(
+            Confidence=CONF_UNRESOLVED,
+            Module=module,
+            Reason="relative_import_beyond_top",
+         )
+      base_parts = package_parts[:len(package_parts) - up_count]
+      module_parts = module.split(".") if module else []
+      resolved = ".".join([*base_parts, *module_parts])
+      return self._ResolveAbsoluteModuleName(resolved)
+
+   def _ImporterPackage(self, file_path: str) -> str | None:
+      path = Path(file_path)
+      if not (path.parent / "__init__.py").exists():
+         return None
+
+      parts: list[str] = []
+      cur = path.parent
+      while (cur / "__init__.py").exists():
+         parts.append(cur.name)
+         cur = cur.parent
+      package = ".".join(reversed(parts))
+      if path.stem == "__init__":
+         return package
+      return package
 
    def _ImportTargetDict(self, target: _ImportTarget) -> dict:
       return {
