@@ -5,6 +5,7 @@ Works **alongside** Ruff and Pyright — it does not replace them.
 
 - `customfmt fix` – applies safe auto-formatting in place  
 - `customfmt check` – checks project-specific naming and style rules (CF001–CF019)
+- `customfmt doctor` – reports read-only project readiness diagnostics
 - `customfmt refs` – discovers read-only project references as JSON
 - `customfmt rename-symbol` – emits a project-wide rename plan as JSON, renders a diff, or applies guarded token edits
 
@@ -88,6 +89,43 @@ Example:
 src/user_model.py:4:1 CF003 function name must be PascalCase: 'calculate_total'
 src/user_model.py:7:1 CF010 indentation of 4 spaces is not a multiple of 3
 ```
+
+---
+
+### `customfmt doctor` — inspect project readiness
+
+```bash
+# Human-readable diagnostics
+customfmt doctor src/
+
+# Compact machine-readable JSON
+customfmt doctor src/ --json
+
+# Indented JSON
+customfmt doctor src/ --pretty
+```
+
+`customfmt doctor` is read-only and never modifies source files. It combines
+existing discovery, checker, auto-fix check, indexer, and resolver behavior to
+report whether a project is ready for customfmt usage. The report includes:
+
+- Python file discovery counts, with no Python files reported as exit code 2.
+- Encoding and line-ending diagnostics for invalid UTF-8, UTF-8 BOM, CRLF, and
+  bare CR files.
+- customfmt rule status grouped by rule code, including a few example
+  violations for each rule.
+- Auto-fix readiness for CF009, CF011, CF013, CF018, and CF019 without writing
+  files.
+- Symbol tooling readiness from the indexer and resolver, including parse/file
+  errors plus unresolved and dynamic reference counts. Normal unresolved
+  references are summarized but do not fail doctor by themselves.
+- Package/import readiness, including regular packages with `__init__.py` and
+  namespace-package-like directories. Namespace-like directories produce a
+  warning because relative import resolution does not fully support them yet.
+
+Exit codes match the rest of the CLI: 0 means healthy/no blocking issues, 1
+means style or format issues were found, and 2 means discovery, parse,
+encoding, or tool/runtime errors were found.
 
 ---
 
