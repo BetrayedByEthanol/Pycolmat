@@ -5,6 +5,7 @@ Commands
 --------
   customfmt fix [--check] [--diff] [--quiet] <paths...>
   customfmt check [--quiet] [--json] <paths...>
+  customfmt doctor [--json | --pretty] <paths...>
   customfmt rename [--check | --diff | --apply] <paths...>
   customfmt index   [--pretty] [--output PATH] <paths...>
   customfmt resolve [--pretty] [--output PATH] <paths...>
@@ -37,6 +38,7 @@ from pathlib import Path
 from customfmt import __version__
 from customfmt.checker import CheckFile
 from customfmt.discovery import CollectFiles
+from customfmt.doctor import DoctorPaths, FormatHuman
 from customfmt.formatter import ProcessFile
 from customfmt.indexer import IndexPaths
 from customfmt.io import WriteUtf8Lf
@@ -134,6 +136,28 @@ def _BuildParser(prog: str = "customfmt") -> argparse.ArgumentParser:
    chk_p.add_argument(
       "--ignore", metavar="RULES", action="append", default=[],
       help="Rule codes to ignore, comma/semicolon-separated (e.g. CF014,CF015). May be repeated.",
+   )
+
+   # -- doctor ---------------------------------------------------------------
+   doc_p = sub.add_parser(
+      "doctor",
+      help="Inspect read-only customfmt project readiness.",
+      description=(
+         "Inspect Python discovery, encoding, style, auto-fix readiness, "
+         "symbol tooling, and package/import readiness without modifying files."
+      ),
+   )
+   doc_p.add_argument("paths", nargs="+", metavar="PATH", help="Files or directories to inspect.")
+   doc_p.add_argument(
+      "--json",
+      action="store_true",
+      dest="json_out",
+      help="Output diagnostics as compact JSON.",
+   )
+   doc_p.add_argument(
+      "--pretty",
+      action="store_true",
+      help="Output diagnostics as indented JSON.",
    )
 
    # -- rename ---------------------------------------------------------------
@@ -424,6 +448,18 @@ def _CmdCheck(args: argparse.Namespace) -> int:
    return 0
 
 
+def _CmdDoctor(args: argparse.Namespace) -> int:
+   report = DoctorPaths(args.paths)
+
+   if args.json_out or args.pretty:
+      indent = 2 if args.pretty else None
+      print(json.dumps(report.ToDict(), indent=indent))
+   else:
+      print(FormatHuman(report), end="")
+
+   return report.ExitCode
+
+
 def _CmdRename(args: argparse.Namespace) -> int:
    import json as _json
 
@@ -703,6 +739,8 @@ def Main(argv: list[str] | None = None, *, prog: str = "customfmt") -> int:
          return _CmdFix(args)
       elif args.command == "check":
          return _CmdCheck(args)
+      elif args.command == "doctor":
+         return _CmdDoctor(args)
       elif args.command == "rename":
          return _CmdRename(args)
       elif args.command == "index":

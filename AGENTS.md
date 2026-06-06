@@ -53,6 +53,7 @@ If changing resolver, indexer, or rename-planner behavior, also inspect JSON out
 ```bash
 create-index customfmt/ --pretty
 resolve-index customfmt/ --pretty
+customfmt doctor customfmt/ tests/ --pretty
 customfmt rename --check customfmt/ --json
 customfmt refs customfmt/ --name ResolveFile --pretty
 ```
@@ -225,6 +226,7 @@ pytest
 | --------------------- | ---------------------------------- |
 | `formatter.py`        | safe deterministic formatting      |
 | `checker.py`          | check/report style rules           |
+| `doctor.py`           | read-only project readiness diagnostics |
 | `indexer.py`          | raw AST symbol indexing            |
 | `symbols/resolver.py` | per-file lexical symbol resolution |
 | `rename_plan.py`      | safe rename planning               |
@@ -235,6 +237,7 @@ Do not mix rewrite logic into the resolver.
 Do not mix project-wide rename logic into the local rename planner.
 Do not put project-wide rename implementation in `symbols/project_graph.py`; it is read-only reference discovery only.
 Do not make `try-auto-format` perform semantic refactors.
+Do not make `customfmt doctor` modify files; it is diagnostics-only.
 
 ---
 
