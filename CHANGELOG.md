@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Added namespace package support for project refs in conservatively resolved, unambiguous scanned roots.
+- Added namespace package support for `rename-symbol` diff/apply when scanned roots make the import target unambiguous.
+- Added the public `InspectProjectModules` module inspection API.
+- Added `customfmt doctor` diagnostics for namespace package ambiguity.
+
 ## v0.1.0 - 2026-06-05
 
 - custom formatter/checker
