@@ -7,7 +7,11 @@ import textwrap
 from pathlib import Path
 
 from customfmt.cli import Main
-from customfmt.symbols.project_graph import FindRefsByName, FindRefsBySymbol
+from customfmt.symbols.project_graph import (
+   FindRefsByName,
+   FindRefsBySymbol,
+   InspectProjectModules,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -587,6 +591,20 @@ class TestProjectRefs:
 
       assert refs[0]["confidence"] == "unresolved"
       assert refs[0]["extra"]["import_target"]["reason"] == "module_not_found"
+
+
+   def TestInspectProjectModulesReportsNamespaceAmbiguity(self, tmp_path):
+      first = tmp_path / "first"
+      second = tmp_path / "second"
+      first_model = Write(first / "ns" / "models.py", "X = 1\n")
+      second_model = Write(second / "ns" / "models.py", "Y = 1\n")
+
+      data = InspectProjectModules([str(first), str(second)])
+
+      assert data["errors"] == []
+      assert data["scan_roots"] == [str(first.resolve()), str(second.resolve())]
+      assert data["modules"]["ns.models"] == [str(first_model), str(second_model)]
+      assert "ns.models" in data["ambiguous_modules"]
 
    def TestPrettyOutputIsIndentedJson(self, tmp_path, capsys):
       f = Write(tmp_path / "main.py", "def Build():\n   return 1\n")

@@ -158,13 +158,15 @@ class ProjectGraph:
    # -----------------------------------------------------------------------
 
    def _BuildModuleMap(self) -> None:
-      for result in self.Results:
-         for name in _ModuleCandidates(Path(result.FilePath), self.ScanRoots):
-            existing = self._ModuleMap.get(name)
-            if existing is None:
-               self._ModuleMap[name] = result
-            elif not _SamePath(existing.FilePath, result.FilePath):
-               self._AmbiguousModules.add(name)
+      module_paths = _InspectModulePaths(
+         [Path(result.FilePath) for result in self.Results],
+         self.ScanRoots,
+      )
+      result_by_path = {str(Path(result.FilePath).resolve()): result for result in self.Results}
+      for module_name, paths in module_paths.items():
+         self._ModuleMap[module_name] = result_by_path[str(Path(paths[0]).resolve())]
+         if len(paths) > 1:
+            self._AmbiguousModules.add(module_name)
 
    def _BuildModuleDefs(self) -> None:
       export_kinds = {
@@ -615,6 +617,27 @@ class ProjectGraph:
 # Public API
 # ---------------------------------------------------------------------------
 
+def InspectProjectModules(paths: list[str]) -> dict:
+   """Return module candidates and ambiguity diagnostics for scanned paths."""
+   errors: list[str] = []
+   try:
+      files = CollectFiles(paths)
+   except FileNotFoundError as exc:
+      errors.append(str(exc))
+      files = []
+
+   scan_roots = _ScanRoots(paths)
+   modules = _InspectModulePaths(files, scan_roots)
+   return {
+      "modules":           {name: [str(p) for p in items] for name, items in modules.items()},
+      "ambiguous_modules": sorted(
+         name for name, items in modules.items() if len(items) > 1
+      ),
+      "scan_roots":        [str(root) for root in scan_roots],
+      "errors":            errors,
+   }
+
+
 def BuildProjectGraph(paths: list[str]) -> tuple[ProjectGraph | None, list[str]]:
    """Collect files, run the per-file resolver, and build a project graph."""
    discovery_errors: list[str] = []
@@ -675,6 +698,16 @@ def ParseSymbol(symbol: str) -> tuple[str, int, int]:
 # ---------------------------------------------------------------------------
 # Module-name helpers
 # ---------------------------------------------------------------------------
+
+def _InspectModulePaths(files: list[Path], scan_roots: list[Path]) -> dict[str, list[Path]]:
+   modules: dict[str, list[Path]] = {}
+   for path in files:
+      for module_name in _ModuleCandidates(path, scan_roots):
+         items = modules.setdefault(module_name, [])
+         if not any(_SamePath(str(existing), str(path)) for existing in items):
+            items.append(path)
+   return {name: modules[name] for name in sorted(modules)}
+
 
 def _ScanRoots(paths: list[str]) -> list[Path]:
    roots: list[Path] = []
