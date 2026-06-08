@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from customfmt.cli import Main
 
 # ---------------------------------------------------------------------------
@@ -27,6 +29,14 @@ def RunDoctor(*args: str) -> int:
 
 
 class TestDoctor:
+   def TestJsonPrettyMutuallyExclusiveExit2(self, tmp_path):
+      f = Write(tmp_path / "my_module.py", "X = 1\n")
+
+      with pytest.raises(SystemExit) as exc_info:
+         RunDoctor(str(f), "--json", "--pretty")
+
+      assert exc_info.value.code == 2
+
    def TestCleanProjectExit0(self, tmp_path):
       pkg = tmp_path / "pkg"
       pkg.mkdir()
