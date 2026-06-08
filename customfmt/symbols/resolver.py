@@ -141,7 +141,7 @@ class _Resolver(ast.NodeVisitor):
       return self._ScopeStack[-1]
 
    def _PushScope(
-      self, kind: ScopeKind, name: str, line: int
+      self, kind: ScopeKind, name: str, line: int, col: int
    ) -> Scope:
       parent = self._Current
       qual = f"{parent.QualName}.{name}" if parent.QualName else name
@@ -151,6 +151,7 @@ class _Resolver(ast.NodeVisitor):
          QualName = qual,
          Line     = line,
          Parent   = parent,
+         Col      = col,
          FilePath = self._FilePath,
       )
       parent.AddChild(scope)
@@ -180,6 +181,19 @@ class _Resolver(ast.NodeVisitor):
       self._Current.AddDef(defn)
       self._AllDefs.append(defn)
       return defn
+
+   def _MethodExtra(
+      self, owner: Scope, method_name: str, is_async: bool
+   ) -> dict:
+      return {
+         "is_async":                   is_async,
+         "owner_class_name":           owner.Name,
+         "owner_class_qualified_name": owner.QualName,
+         "owner_class_file":           owner.FilePath,
+         "owner_class_line":           owner.Line,
+         "owner_class_col":            owner.Col,
+         "method_name":                method_name,
+      }
 
    def _AddRef(
       self,
@@ -428,11 +442,17 @@ class _Resolver(ast.NodeVisitor):
       cur = self._Current
       is_method = cur.Kind == ScopeKind.Class
       kind = DefKind.MethodDef if is_method else DefKind.FunctionDef
-      is_async = {"is_async": isinstance(node, ast.AsyncFunctionDef)}
-      self._AddDef(node.name, kind, node.lineno, node.col_offset, is_async)
+      is_async = isinstance(node, ast.AsyncFunctionDef)
+      extra = (
+         self._MethodExtra(cur, node.name, is_async)
+         if is_method else {"is_async": is_async}
+      )
+      self._AddDef(node.name, kind, node.lineno, node.col_offset, extra)
       # Decorators are walked in the OUTER scope before pushing.
       self._RecordDecorators(node)
-      self._PushScope(ScopeKind.Function, node.name, node.lineno)
+      self._PushScope(
+         ScopeKind.Function, node.name, node.lineno, node.col_offset
+      )
       # Parameters (including annotations) — recorded inside the function scope.
       args = node.args
       all_args = (
@@ -478,7 +498,9 @@ class _Resolver(ast.NodeVisitor):
       # Keyword arguments, e.g. metaclass=AllOptional.
       for kw in node.keywords:
          self._WalkExprForRefs(kw.value)
-      self._PushScope(ScopeKind.Class, node.name, node.lineno)
+      self._PushScope(
+         ScopeKind.Class, node.name, node.lineno, node.col_offset
+      )
       for stmt in node.body:
          self.visit(stmt)
       self._PopScope()

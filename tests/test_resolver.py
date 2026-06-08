@@ -152,6 +152,65 @@ def AnnRefs(result, name: str):
    ]
 
 
+class TestMethodOwnerMetadata:
+   def TestMethodDefinitionHasOwnerMetadata(self, tmp_path):
+      src = Src("""\
+         class Repo:
+            def GetByID(self):
+               pass
+      """)
+      f = Write(tmp_path / "f.py", src)
+      result = ResolveFile(f)
+      method = next(d for d in Defs(result, "GetByID") if d.Kind == DefKind.MethodDef)
+      assert method.Extra["owner_class_name"] == "Repo"
+      assert method.Extra["owner_class_qualified_name"] == "Repo"
+      assert method.Extra["owner_class_file"] == str(f)
+      assert method.Extra["owner_class_line"] == 1
+      assert method.Extra["owner_class_col"] == 0
+      assert method.Extra["method_name"] == "GetByID"
+      assert method.Extra["is_async"] is False
+
+   def TestAsyncMethodDefinitionHasOwnerMetadata(self, tmp_path):
+      src = Src("""\
+         class Repo:
+            async def Fetch(self):
+               pass
+      """)
+      f = Write(tmp_path / "f.py", src)
+      result = ResolveFile(f)
+      method = next(d for d in Defs(result, "Fetch") if d.Kind == DefKind.MethodDef)
+      assert method.Extra["owner_class_name"] == "Repo"
+      assert method.Extra["method_name"] == "Fetch"
+      assert method.Extra["is_async"] is True
+
+   def TestNestedFunctionInsideMethodHasNoOwnerMetadata(self, tmp_path):
+      src = Src("""\
+         class Repo:
+            def Outer(self):
+               def Inner():
+                  pass
+      """)
+      f = Write(tmp_path / "f.py", src)
+      result = ResolveFile(f)
+      inner = next(d for d in Defs(result, "Inner") if d.Kind == DefKind.FunctionDef)
+      assert "owner_class_name" not in inner.Extra
+
+   def TestSameMethodNameDifferentOwnerMetadata(self, tmp_path):
+      src = Src("""\
+         class RepoA:
+            def Render(self):
+               pass
+         class RepoB:
+            def Render(self):
+               pass
+      """)
+      f = Write(tmp_path / "f.py", src)
+      result = ResolveFile(f)
+      methods = [d for d in Defs(result, "Render") if d.Kind == DefKind.MethodDef]
+      owners = {m.Extra["owner_class_qualified_name"] for m in methods}
+      assert owners == {"RepoA", "RepoB"}
+
+
 # ---------------------------------------------------------------------------
 # TestScopeIds
 # ---------------------------------------------------------------------------

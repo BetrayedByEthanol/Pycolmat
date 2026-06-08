@@ -279,11 +279,11 @@ modes.
 
 ## Implementation Phases
 
-1. Resolver metadata only
+1. Resolver metadata only (Phase 1 implemented)
 
-   - expose class-owned method definitions
+   - expose class-owned method definitions in indexer and resolver output
 
-   - expose owning class metadata
+   - expose owning class metadata in definition `extra` fields
 
    - no rename behavior changes
 
