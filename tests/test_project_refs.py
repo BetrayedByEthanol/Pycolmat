@@ -593,20 +593,26 @@ class TestProjectRefs:
       assert refs[0]["extra"]["import_target"]["reason"] == "module_not_found"
 
 
-   def TestInspectProjectModulesReportsNamespaceAmbiguity(self, tmp_path):
+   def TestInspectProjectModulesReportsAmbiguity(self, tmp_path):
       first = tmp_path / "first"
       second = tmp_path / "second"
-      first_model = Write(first / "ns" / "models.py", "X = 1\n")
-      second_model = Write(second / "ns" / "models.py", "Y = 1\n")
+      first_model = Write(first / "ns" / "models.py", "class UserModel:\n   pass\n")
+      second_model = Write(second / "ns" / "models.py", "class UserModel:\n   pass\n")
 
-      data = InspectProjectModules([str(first), str(second)])
+      result = InspectProjectModules([str(first), str(second)])
 
-      assert data["errors"] == []
-      assert data["scan_roots"] == [str(first.resolve()), str(second.resolve())]
-      assert "ns.models" in data["modules"]
-      assert str(first_model) in data["modules"]["ns.models"]
-      assert str(second_model) in data["modules"]["ns.models"]
-      assert "ns.models" in data["ambiguous_modules"]
+      assert "ns.models" in result["modules"]
+      module_paths = {
+         str(Path(p).resolve()) for p in result["modules"]["ns.models"]
+      }
+      assert module_paths == {
+         str(first_model.resolve()),
+         str(second_model.resolve()),
+      }
+      assert "ns.models" in result["ambiguous_modules"]
+      scan_roots = {str(Path(p).resolve()) for p in result["scan_roots"]}
+      assert scan_roots == {str(first.resolve()), str(second.resolve())}
+      assert result["errors"] == []
 
    def TestPrettyOutputIsIndentedJson(self, tmp_path, capsys):
       f = Write(tmp_path / "main.py", "def Build():\n   return 1\n")
