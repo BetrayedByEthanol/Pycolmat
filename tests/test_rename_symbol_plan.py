@@ -443,8 +443,34 @@ class TestRenameSymbolDiff:
       assert "+   return AccountModel()" in out
       assert f.read_text(encoding="utf-8") == original
 
+   def TestDiffIncludesNamespaceAbsoluteImportBindingAndCallSite(self, tmp_path):
+      ns = tmp_path / "ns"
+      Write(ns / "models.py", "class UserModel:\n   pass\n")
+      main = Write(
+         ns / "main.py",
+         Src(
+            """
+            from ns.models import UserModel
 
-   def TestDiffIncludesNamespaceImportBindingAndCallSite(self, tmp_path):
+            def Build():
+               return UserModel()
+            """
+         ),
+      )
+
+      rc, out, err = self.RunDiff(tmp_path, "--name", "UserModel", "--to", "AccountModel")
+
+      assert rc == 0
+      assert err == ""
+      assert "-class UserModel:" in out
+      assert "+class AccountModel:" in out
+      assert "-from ns.models import UserModel" in out
+      assert "+from ns.models import AccountModel" in out
+      assert "-   return UserModel()" in out
+      assert "+   return AccountModel()" in out
+      assert "UserModel" in main.read_text(encoding="utf-8")
+
+   def TestDiffIncludesNamespaceRelativeImportBindingAndCallSite(self, tmp_path):
       ns = tmp_path / "ns"
       Write(ns / "models.py", "class UserModel:\n   pass\n")
       main = Write(
@@ -726,8 +752,8 @@ class TestRenameSymbolApply:
    def TestApplyRejectsAmbiguousNamespacePackageByDefault(self, tmp_path):
       first = tmp_path / "first"
       second = tmp_path / "second"
-      Write(first / "ns" / "models.py", "class UserModel:\n   pass\n")
-      Write(second / "ns" / "models.py", "class OtherModel:\n   pass\n")
+      model = Write(first / "ns" / "models.py", "class UserModel:\n   pass\n")
+      other = Write(second / "ns" / "models.py", "class UserModel:\n   pass\n")
       main = Write(
          first / "ns" / "main.py",
          Src(
@@ -739,15 +765,55 @@ class TestRenameSymbolApply:
             """
          ),
       )
-      original = main.read_text(encoding="utf-8")
+      original_model = model.read_text(encoding="utf-8")
+      original_other = other.read_text(encoding="utf-8")
+      original_main = main.read_text(encoding="utf-8")
+      symbol = f"{model}:1:0"
 
       rc, _out, err = self.RunApply(
-         [str(first), str(second)], "--name", "UserModel", "--to", "AccountModel"
+         [str(first), str(second)], "--symbol", symbol, "--to", "AccountModel"
       )
 
       assert rc == 2
       assert "refused incomplete plan" in err
-      assert main.read_text(encoding="utf-8") == original
+      assert model.read_text(encoding="utf-8") == original_model
+      assert other.read_text(encoding="utf-8") == original_other
+      assert main.read_text(encoding="utf-8") == original_main
+
+   def TestApplyAllowIncompleteOnlyAppliesSafeAmbiguousNamespaceEdits(self, tmp_path):
+      first = tmp_path / "first"
+      second = tmp_path / "second"
+      model = Write(first / "ns" / "models.py", "class UserModel:\n   pass\n")
+      other = Write(second / "ns" / "models.py", "class UserModel:\n   pass\n")
+      main = Write(
+         first / "ns" / "main.py",
+         Src(
+            """
+            from ns.models import UserModel
+
+            def Build():
+               return UserModel()
+            """
+         ),
+      )
+      original_other = other.read_text(encoding="utf-8")
+      original_main = main.read_text(encoding="utf-8")
+      symbol = f"{model}:1:0"
+
+      rc, out, err = self.RunApply(
+         [str(first), str(second)],
+         "--symbol", symbol,
+         "--to", "AccountModel",
+         "--allow-incomplete",
+      )
+
+      assert rc == 0
+      assert err == ""
+      assert f"renamed {model}" in out
+      assert f"renamed {main}" not in out
+      assert "class AccountModel:" in model.read_text(encoding="utf-8")
+      assert other.read_text(encoding="utf-8") == original_other
+      assert main.read_text(encoding="utf-8") == original_main
 
    def TestApplyUpdatesOneFile(self, tmp_path):
       f = Write(

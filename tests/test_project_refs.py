@@ -565,6 +565,29 @@ class TestProjectRefs:
       assert refs[0]["confidence"] == "unresolved"
       assert refs[0]["extra"]["import_target"]["reason"] == "module_not_found"
 
+   def TestMissingRelativeImportWithOverlappingScanRootsIsNotAmbiguous(
+      self, tmp_path
+   ):
+      ns = tmp_path / "ns"
+      Write(
+         ns / "main.py",
+         Src(
+            """
+            from .missing import UserModel
+
+            def Build():
+               return UserModel()
+            """
+         ),
+      )
+
+      result, _ = FindRefsByName([str(tmp_path), str(ns)], "UserModel")
+      data = result.ToDict()
+      refs = [r for r in data["references"] if r["name"] == "UserModel"]
+
+      assert refs[0]["confidence"] == "unresolved"
+      assert refs[0]["extra"]["import_target"]["reason"] == "module_not_found"
+
    def TestPrettyOutputIsIndentedJson(self, tmp_path, capsys):
       f = Write(tmp_path / "main.py", "def Build():\n   return 1\n")
 

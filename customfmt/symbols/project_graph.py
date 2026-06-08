@@ -238,13 +238,16 @@ class ProjectGraph:
       selected_ref = self._FindReferenceAt(file_path, line, col)
 
       target_locs: set[_SymbolLocation] = set()
+      selected_name = ""
       if selected_def is not None:
+         selected_name = selected_def.Name
          target_locs.add(self._DefLocation(selected_def))
          if selected_def.Kind in (DefKind.Import, DefKind.ImportFrom):
             import_target = self._ResolveImportDefinition(selected_def)
             if import_target.Target is not None:
                target_locs.add(self._DefLocation(import_target.Target))
       elif selected_ref is not None:
+         selected_name = selected_ref.Name
          selected_project_ref = self._ProjectReference(selected_ref)
          self._AppendReference(output, selected_project_ref)
          if selected_project_ref.ResolvedTo is not None:
@@ -256,6 +259,9 @@ class ProjectGraph:
          target = project_ref.ResolvedTo
          if target is not None and self._ProjectDefLocation(target) in target_locs:
             self._AppendReference(output, project_ref)
+         elif selected_name and ref.Name == selected_name:
+            if project_ref.Confidence in (CONF_UNRESOLVED, CONF_DYNAMIC):
+               self._AppendReference(output, project_ref)
 
       return output
 
@@ -509,7 +515,16 @@ class ProjectGraph:
       modules = {t.Module for t in resolved_targets}
       if len(modules) == 1:
          return resolved_targets[0]
-      if len(modules) > 1 or len(packages) > 1:
+      if len(modules) > 1:
+         return _ImportTarget(
+            Confidence=CONF_UNRESOLVED,
+            Module=module,
+            Reason="namespace_package_ambiguous",
+         )
+      ambiguous_targets = [
+         t for t in targets if t.Reason in ("module_ambiguous", "namespace_package_ambiguous")
+      ]
+      if ambiguous_targets:
          return _ImportTarget(
             Confidence=CONF_UNRESOLVED,
             Module=module,
