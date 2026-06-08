@@ -453,6 +453,97 @@ class TestProjectRefs:
       assert refs[0]["confidence"] == "import_resolved"
       assert refs[0]["resolved_to"]["file"] == str(utils)
 
+
+   def TestNamespacePackageAbsoluteImportResolves(self, tmp_path):
+      ns = tmp_path / "ns"
+      models = Write(ns / "models.py", "class UserModel:\n   pass\n")
+      Write(
+         ns / "main.py",
+         Src(
+            """
+            from ns.models import UserModel
+
+            def Build():
+               return UserModel()
+            """
+         ),
+      )
+
+      result, _ = FindRefsByName([str(tmp_path)], "UserModel")
+      data = result.ToDict()
+      refs = [r for r in data["references"] if r["name"] == "UserModel"]
+
+      assert refs[0]["confidence"] == "import_resolved"
+      assert refs[0]["resolved_to"]["file"] == str(models)
+
+   def TestNamespacePackageRelativeImportResolves(self, tmp_path):
+      ns = tmp_path / "ns"
+      models = Write(ns / "models.py", "class UserModel:\n   pass\n")
+      Write(
+         ns / "main.py",
+         Src(
+            """
+            from .models import UserModel
+
+            def Build():
+               return UserModel()
+            """
+         ),
+      )
+
+      result, _ = FindRefsByName([str(tmp_path)], "UserModel")
+      data = result.ToDict()
+      refs = [r for r in data["references"] if r["name"] == "UserModel"]
+
+      assert refs[0]["confidence"] == "import_resolved"
+      assert refs[0]["resolved_to"]["file"] == str(models)
+
+   def TestNestedNamespacePackageParentRelativeImportResolves(self, tmp_path):
+      ns = tmp_path / "ns"
+      models = Write(ns / "models.py", "class UserModel:\n   pass\n")
+      Write(
+         ns / "sub" / "main.py",
+         Src(
+            """
+            from ..models import UserModel
+
+            def Build():
+               return UserModel()
+            """
+         ),
+      )
+
+      result, _ = FindRefsByName([str(tmp_path)], "UserModel")
+      data = result.ToDict()
+      refs = [r for r in data["references"] if r["name"] == "UserModel"]
+
+      assert refs[0]["confidence"] == "import_resolved"
+      assert refs[0]["resolved_to"]["file"] == str(models)
+
+   def TestAmbiguousNamespaceModuleRemainsUnresolved(self, tmp_path):
+      first = tmp_path / "first"
+      second = tmp_path / "second"
+      Write(first / "ns" / "models.py", "class UserModel:\n   pass\n")
+      Write(second / "ns" / "models.py", "class UserModel:\n   pass\n")
+      Write(
+         first / "ns" / "main.py",
+         Src(
+            """
+            from ns.models import UserModel
+
+            def Build():
+               return UserModel()
+            """
+         ),
+      )
+
+      result, _ = FindRefsByName([str(first), str(second)], "UserModel")
+      data = result.ToDict()
+      refs = [r for r in data["references"] if r["name"] == "UserModel"]
+
+      assert refs[0]["confidence"] == "unresolved"
+      assert refs[0]["extra"]["import_target"]["reason"] == "module_ambiguous"
+
    def TestUnresolvedRelativeImportStaysUnresolved(self, tmp_path):
       pkg = Package(tmp_path)
       Write(

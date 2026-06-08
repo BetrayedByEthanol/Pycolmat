@@ -124,14 +124,35 @@ class TestDoctor:
       assert "Symbol tooling readiness" in out
       assert "Package / import readiness" in out
 
-   def TestDetectsNamespaceLikeDirectories(self, tmp_path, capsys):
-      f = Write(tmp_path / "my_module.py", "X = 1\n")
+   def TestReportsUnambiguousNamespaceLikeDirectoriesWithoutWarning(
+      self, tmp_path, capsys
+   ):
+      ns = tmp_path / "ns"
+      ns.mkdir()
+      f = Write(ns / "my_module.py", "X = 1\n")
 
-      rc = RunDoctor("--json", str(f))
+      rc = RunDoctor("--json", str(tmp_path))
       data = json.loads(capsys.readouterr().out)
 
       assert rc == 0
       assert data["package_readiness"]["namespace_like_count"] == 1
+      assert data["package_readiness"]["namespace_like_dirs"] == [str(f.parent)]
+      assert data["package_readiness"]["warnings"] == []
+
+   def TestWarnsForAmbiguousNamespacePackageStructure(self, tmp_path, capsys):
+      first = tmp_path / "first" / "ns"
+      second = tmp_path / "second" / "ns"
+      first.mkdir(parents=True)
+      second.mkdir(parents=True)
+      Write(first / "models.py", "X = 1\n")
+      Write(second / "models.py", "Y = 1\n")
+
+      rc = RunDoctor("--json", str(tmp_path / "first"), str(tmp_path / "second"))
+      data = json.loads(capsys.readouterr().out)
+
+      assert rc == 0
+      assert data["package_readiness"]["namespace_like_count"] == 2
+      assert "ns.models" in data["package_readiness"]["ambiguous_namespace_modules"]
       assert data["package_readiness"]["warnings"]
 
    def TestEncodingIoErrorsHaveSeparateJsonBucket(self, tmp_path, capsys, monkeypatch):

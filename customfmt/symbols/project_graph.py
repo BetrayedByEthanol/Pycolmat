@@ -140,9 +140,12 @@ class _ImportTarget:
 class ProjectGraph:
    """Conservative project-level graph for read-only reference lookup."""
 
-   def __init__(self, results: list[ResolveResult], errors: list[FileError]) -> None:
-      self.Results = results
-      self.Errors  = errors
+   def __init__(
+      self, results: list[ResolveResult], errors: list[FileError], scan_roots: list[Path]
+   ) -> None:
+      self.Results   = results
+      self.Errors    = errors
+      self.ScanRoots = scan_roots
       self._ModuleMap        : dict[str, ResolveResult] = {}
       self._AmbiguousModules : set[str]                  = set()
       self._ModuleDefs       : dict[tuple[str, str], Definition] = {}
@@ -155,9 +158,8 @@ class ProjectGraph:
    # -----------------------------------------------------------------------
 
    def _BuildModuleMap(self) -> None:
-      paths = [Path(r.FilePath) for r in self.Results]
       for result in self.Results:
-         for name in _ModuleCandidates(Path(result.FilePath), paths):
+         for name in _ModuleCandidates(Path(result.FilePath), self.ScanRoots):
             existing = self._ModuleMap.get(name)
             if existing is None:
                self._ModuleMap[name] = result
@@ -431,6 +433,12 @@ class ProjectGraph:
             Reason="module_not_found",
          )
 
+      if module in self._AmbiguousModules:
+         return _ImportTarget(
+            Confidence=CONF_UNRESOLVED,
+            Module=module,
+            Reason="module_ambiguous",
+         )
       target = self._ModuleDefs.get((module, name))
       if target is None:
          return _ImportTarget(
@@ -471,40 +479,64 @@ class ProjectGraph:
    def _ResolveRelativeModuleName(
       self, defn: Definition, level: int, module: str
    ) -> _ImportTarget:
-      package = self._ImporterPackage(defn.ScopeRef.FilePath)
-      if package is None:
+      packages = self._ImporterPackages(defn.ScopeRef.FilePath)
+      if not packages:
          return _ImportTarget(
             Confidence=CONF_UNRESOLVED,
             Module=module,
             Reason="relative_import_outside_package",
          )
-      package_parts = package.split(".") if package else []
+
+      targets: list[_ImportTarget] = []
+      unresolved: list[_ImportTarget] = []
       up_count = level - 1
-      if up_count > len(package_parts):
+      for package in packages:
+         package_parts = package.split(".") if package else []
+         if up_count > len(package_parts):
+            unresolved.append(_ImportTarget(
+               Confidence=CONF_UNRESOLVED,
+               Module=module,
+               Reason="relative_import_beyond_top",
+            ))
+            continue
+         base_parts = package_parts[:len(package_parts) - up_count]
+         module_parts = module.split(".") if module else []
+         resolved = ".".join([*base_parts, *module_parts])
+         target = self._ResolveAbsoluteModuleName(resolved)
+         targets.append(target)
+
+      resolved_targets = [t for t in targets if t.Confidence == CONF_IMPORT_RESOLVED]
+      modules = {t.Module for t in resolved_targets}
+      if len(modules) == 1:
+         return resolved_targets[0]
+      if len(modules) > 1 or len(packages) > 1:
          return _ImportTarget(
             Confidence=CONF_UNRESOLVED,
             Module=module,
-            Reason="relative_import_beyond_top",
+            Reason="namespace_package_ambiguous",
          )
-      base_parts = package_parts[:len(package_parts) - up_count]
-      module_parts = module.split(".") if module else []
-      resolved = ".".join([*base_parts, *module_parts])
-      return self._ResolveAbsoluteModuleName(resolved)
+      if targets:
+         return targets[0]
+      if unresolved:
+         return unresolved[0]
+      return _ImportTarget(
+         Confidence=CONF_UNRESOLVED,
+         Module=module,
+         Reason="module_not_found",
+      )
 
-   def _ImporterPackage(self, file_path: str) -> str | None:
+   def _ImporterPackages(self, file_path: str) -> list[str]:
       path = Path(file_path)
-      if not (path.parent / "__init__.py").exists():
-         return None
+      regular = _RegularPackageName(path)
+      if regular is not None:
+         return [regular]
 
-      parts: list[str] = []
-      cur = path.parent
-      while (cur / "__init__.py").exists():
-         parts.append(cur.name)
-         cur = cur.parent
-      package = ".".join(reversed(parts))
-      if path.stem == "__init__":
-         return package
-      return package
+      packages: list[str] = []
+      for root in self.ScanRoots:
+         rel_package = _NamespacePackageName(path.parent, root)
+         if rel_package:
+            packages.append(rel_package)
+      return list(dict.fromkeys(packages))
 
    def _ImportTargetDict(self, target: _ImportTarget) -> dict:
       return {
@@ -589,7 +621,8 @@ def BuildProjectGraph(paths: list[str]) -> tuple[ProjectGraph | None, list[str]]
       else:
          results.append(result)
 
-   return ProjectGraph(results, errors), discovery_errors
+   scan_roots = _ScanRoots(paths)
+   return ProjectGraph(results, errors, scan_roots), discovery_errors
 
 
 def FindRefsByName(paths: list[str], name: str) -> tuple[RefsResult | None, list[str]]:
@@ -628,27 +661,84 @@ def ParseSymbol(symbol: str) -> tuple[str, int, int]:
 # Module-name helpers
 # ---------------------------------------------------------------------------
 
-def _ModuleCandidates(path: Path, all_paths: list[Path]) -> list[str]:
-   del all_paths
+def _ScanRoots(paths: list[str]) -> list[Path]:
+   roots: list[Path] = []
+   for raw in paths:
+      path = Path(raw)
+      root = path.parent if path.is_file() else path
+      try:
+         root = root.resolve()
+      except OSError:
+         pass
+      if root not in roots:
+         roots.append(root)
+   return roots
+
+
+def _ModuleCandidates(path: Path, scan_roots: list[Path]) -> list[str]:
    candidates: list[str] = []
    stem = path.stem
    if stem != "__init__":
       candidates.append(stem)
+
+   regular = _RegularModuleName(path)
+   if regular:
+      candidates.append(regular)
+
+   for root in scan_roots:
+      relative = _NamespaceModuleName(path, root)
+      if relative:
+         candidates.append(relative)
+
+   return list(dict.fromkeys(candidates))
+
+
+def _RegularModuleName(path: Path) -> str:
+   package = _RegularPackageName(path)
+   if package is None:
+      return ""
+   if path.stem == "__init__":
+      return package
+   return f"{package}.{path.stem}" if package else path.stem
+
+
+def _RegularPackageName(path: Path) -> str | None:
+   if not (path.parent / "__init__.py").exists():
+      return None
 
    parts: list[str] = []
    cur = path.parent
    while (cur / "__init__.py").exists():
       parts.append(cur.name)
       cur = cur.parent
+   return ".".join(reversed(parts))
 
-   if parts:
-      package = ".".join(reversed(parts))
-      if stem == "__init__":
-         candidates.append(package)
-      else:
-         candidates.append(f"{package}.{stem}")
 
-   return list(dict.fromkeys(candidates))
+def _NamespaceModuleName(path: Path, root: Path) -> str:
+   rel = _RelativePath(path, root)
+   if rel is None or rel.suffix != ".py":
+      return ""
+   parts = list(rel.with_suffix("").parts)
+   if not parts:
+      return ""
+   if parts[-1] == "__init__":
+      parts = parts[:-1]
+   return ".".join(parts)
+
+
+def _NamespacePackageName(path: Path, root: Path) -> str:
+   rel = _RelativePath(path, root)
+   if rel is None:
+      return ""
+   parts = list(rel.parts)
+   return ".".join(parts)
+
+
+def _RelativePath(path: Path, root: Path) -> Path | None:
+   try:
+      return path.resolve().relative_to(root.resolve())
+   except (OSError, ValueError):
+      return None
 
 
 def _SamePath(left: str, right: str) -> bool:
