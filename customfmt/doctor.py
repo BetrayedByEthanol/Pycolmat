@@ -17,6 +17,7 @@ from customfmt.formatter import ProcessFile
 from customfmt.indexer import IndexPaths
 from customfmt.io import UTF8_BOM, ReadUtf8Bytes
 from customfmt.symbols.model import FileError
+from customfmt.symbols.project_graph import _ModuleCandidates, _ScanRoots
 from customfmt.symbols.resolver import ResolveFile
 from customfmt.types import Violation
 
@@ -96,7 +97,7 @@ def DoctorPaths(paths: list[str]) -> DoctorReport:
    checker_errors          = _InspectRules(files, report)
    report.AutoFixReadiness = _InspectAutoFixReadiness(files)
    report.SymbolReadiness  = _InspectSymbolReadiness(paths, files)
-   report.PackageReadiness = _InspectPackages(files)
+   report.PackageReadiness = _InspectPackages(paths, files)
 
    blocking = bool(
       report.Encoding["non_utf8_count"]
@@ -190,6 +191,10 @@ def FormatHuman(report: DoctorReport) -> str:
    lines.append("Package / import readiness")
    lines.append(f"  packages: {pkg.get('package_count', 0)}")
    lines.append(f"  namespace_like_dirs: {pkg.get('namespace_like_count', 0)}")
+   lines.append(
+      "  namespace_support: conservative inside scanned roots when ancestry "
+      "is unambiguous"
+   )
    if pkg.get("warnings"):
       for warning in pkg["warnings"]:
          lines.append(f"  warning: {warning}")
@@ -235,8 +240,13 @@ def _FillEmptySections(report: DoctorReport) -> None:
       "package_count":        0,
       "packages":             [],
       "namespace_like_count": 0,
-      "namespace_like_dirs":  [],
-      "warnings":             [],
+      "namespace_like_dirs":        [],
+      "ambiguous_namespace_modules": [],
+      "namespace_support":          (
+         "namespace-package-like directories are supported conservatively "
+         "inside scanned roots when ancestry is unambiguous"
+      ),
+      "warnings":                   [],
    }
 
 
@@ -359,23 +369,50 @@ def _InspectSymbolReadiness(paths: list[str], files: list[Path]) -> dict:
    }
 
 
-def _InspectPackages(files: list[Path]) -> dict:
+def _InspectPackages(paths: list[str], files: list[Path]) -> dict:
    dirs_with_py = {path.parent for path in files}
    package_dirs = sorted(d for d in dirs_with_py if (d / "__init__.py").exists())
    namespace_like = sorted(d for d in dirs_with_py if d not in package_dirs)
+   ambiguous_modules = _AmbiguousNamespaceModules(paths, files, namespace_like)
    warnings: list[str] = []
-   if namespace_like:
+   if ambiguous_modules:
+      modules = ", ".join(ambiguous_modules[:EXAMPLE_LIMIT])
       warnings.append(
-         "namespace-package-like directories are not fully supported for "
-         "relative import resolution yet"
+         "namespace-package-like directories are supported conservatively when "
+         "scanned roots make module ancestry unambiguous; ambiguous namespace "
+         f"modules remain unresolved: {modules}"
       )
    return {
-      "package_count":        len(package_dirs),
-      "packages":             [str(d) for d in package_dirs],
-      "namespace_like_count": len(namespace_like),
-      "namespace_like_dirs":  [str(d) for d in namespace_like],
-      "warnings":             warnings,
+      "package_count":              len(package_dirs),
+      "packages":                   [str(d) for d in package_dirs],
+      "namespace_like_count":       len(namespace_like),
+      "namespace_like_dirs":        [str(d) for d in namespace_like],
+      "ambiguous_namespace_modules": ambiguous_modules,
+      "namespace_support":          (
+         "namespace-package-like directories are supported conservatively "
+         "inside scanned roots when ancestry is unambiguous"
+      ),
+      "warnings":                   warnings,
    }
+
+
+def _AmbiguousNamespaceModules(
+   paths: list[str], files: list[Path], namespace_like: list[Path]
+) -> list[str]:
+   namespace_set = set(namespace_like)
+   scan_roots = _ScanRoots(paths)
+   seen: dict[str, Path] = {}
+   ambiguous: set[str] = set()
+   for path in files:
+      if path.parent not in namespace_set:
+         continue
+      for module in _ModuleCandidates(path, scan_roots):
+         existing = seen.get(module)
+         if existing is None:
+            seen[module] = path
+         elif existing != path:
+            ambiguous.add(module)
+   return sorted(ambiguous)
 
 
 def _AppendFileExamples(lines: list[str], paths: list[str], label: str) -> None:

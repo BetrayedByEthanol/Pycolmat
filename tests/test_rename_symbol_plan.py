@@ -443,6 +443,34 @@ class TestRenameSymbolDiff:
       assert "+   return AccountModel()" in out
       assert f.read_text(encoding="utf-8") == original
 
+
+   def TestDiffIncludesNamespaceImportBindingAndCallSite(self, tmp_path):
+      ns = tmp_path / "ns"
+      Write(ns / "models.py", "class UserModel:\n   pass\n")
+      main = Write(
+         ns / "main.py",
+         Src(
+            """
+            from .models import UserModel
+
+            def Build():
+               return UserModel()
+            """
+         ),
+      )
+
+      rc, out, err = self.RunDiff(tmp_path, "--name", "UserModel", "--to", "AccountModel")
+
+      assert rc == 0
+      assert err == ""
+      assert "-class UserModel:" in out
+      assert "+class AccountModel:" in out
+      assert "-from .models import UserModel" in out
+      assert "+from .models import AccountModel" in out
+      assert "-   return UserModel()" in out
+      assert "+   return AccountModel()" in out
+      assert "UserModel" in main.read_text(encoding="utf-8")
+
    def TestDiffOutputIsRejectedAndDoesNotWriteFile(self, tmp_path):
       f = Write(tmp_path / "main.py", "class UserModel:\n   pass\n")
       out_path = tmp_path / "rename.diff"
@@ -663,9 +691,63 @@ class TestRenameSymbolApply:
    def RunApply(self, paths, *args: str) -> tuple[int, str, str]:
       out = StringIO()
       err = StringIO()
+      path_args = paths if isinstance(paths, list) else [str(paths)]
       with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-         rc = Main(["rename-symbol", str(paths), *args, "--apply"])
+         rc = Main(["rename-symbol", *path_args, *args, "--apply"])
       return rc, out.getvalue(), err.getvalue()
+
+
+   def TestApplyUpdatesSafeNamespacePackageCase(self, tmp_path):
+      ns = tmp_path / "ns"
+      model = Write(ns / "models.py", "class UserModel:\n   pass\n")
+      main = Write(
+         ns / "main.py",
+         Src(
+            """
+            from .models import UserModel
+
+            def Build():
+               return UserModel()
+            """
+         ),
+      )
+
+      rc, out, err = self.RunApply(tmp_path, "--name", "UserModel", "--to", "AccountModel")
+
+      assert rc == 0
+      assert err == ""
+      assert f"renamed {model}" in out
+      assert f"renamed {main}" in out
+      assert "class AccountModel:" in model.read_text(encoding="utf-8")
+      main_text = main.read_text(encoding="utf-8")
+      assert "from .models import AccountModel" in main_text
+      assert "return AccountModel()" in main_text
+
+   def TestApplyRejectsAmbiguousNamespacePackageByDefault(self, tmp_path):
+      first = tmp_path / "first"
+      second = tmp_path / "second"
+      Write(first / "ns" / "models.py", "class UserModel:\n   pass\n")
+      Write(second / "ns" / "models.py", "class OtherModel:\n   pass\n")
+      main = Write(
+         first / "ns" / "main.py",
+         Src(
+            """
+            from ns.models import UserModel
+
+            def Build():
+               return UserModel()
+            """
+         ),
+      )
+      original = main.read_text(encoding="utf-8")
+
+      rc, _out, err = self.RunApply(
+         [str(first), str(second)], "--name", "UserModel", "--to", "AccountModel"
+      )
+
+      assert rc == 2
+      assert "refused incomplete plan" in err
+      assert main.read_text(encoding="utf-8") == original
 
    def TestApplyUpdatesOneFile(self, tmp_path):
       f = Write(
