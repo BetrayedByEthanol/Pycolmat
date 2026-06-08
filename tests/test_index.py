@@ -263,6 +263,57 @@ class TestAstIndexer:
       m = Symbols(idx, KIND_METHOD)[0]
       assert m.QualifiedName == "Repo.GetByID"
       assert m.Scope == "Repo"
+      assert m.Extra["owner_class_name"] == "Repo"
+      assert m.Extra["owner_class_qualified_name"] == "Repo"
+      assert m.Extra["owner_class_file"] == str(f)
+      assert m.Extra["owner_class_line"] == 1
+      assert m.Extra["owner_class_col"] == 0
+      assert m.Extra["method_name"] == "GetByID"
+      assert m.Extra["is_async"] is False
+
+   def TestAsyncMethodHasOwnerMetadata(self, tmp_path):
+      f = Write(tmp_path / "f.py", Src(
+         "class Repo:\n   async def Fetch(self):\n      pass\n"
+      ))
+      idx = IndexFile(f)
+      method = Symbols(idx, KIND_METHOD)[0]
+      assert method.Name == "Fetch"
+      assert method.Extra["owner_class_name"] == "Repo"
+      assert method.Extra["method_name"] == "Fetch"
+      assert method.Extra["is_async"] is True
+
+   def TestNestedFunctionInsideMethodHasNoOwnerMetadata(self, tmp_path):
+      f = Write(tmp_path / "f.py", Src("""\
+         class Repo:
+            def Outer(self):
+               def Inner():
+                  pass
+      """))
+      idx = IndexFile(f)
+      inner = next(s for s in Symbols(idx, KIND_FUNCTION) if s.Name == "Inner")
+      assert inner.QualifiedName == "Repo.Outer.Inner"
+      assert "owner_class_name" not in inner.Extra
+
+   def TestSameMethodNameDifferentOwnerMetadata(self, tmp_path):
+      f = Write(tmp_path / "f.py", Src("""\
+         class RepoA:
+            def Render(self):
+               pass
+         class RepoB:
+            def Render(self):
+               pass
+      """))
+      idx = IndexFile(f)
+      methods = Symbols(idx, KIND_METHOD)
+      owners = {m.Extra["owner_class_qualified_name"] for m in methods}
+      assert owners == {"RepoA", "RepoB"}
+
+   def TestAssignedCallableInClassIsNotMethod(self, tmp_path):
+      f = Write(tmp_path / "f.py", Src(
+         "class Repo:\n   Helper = lambda self: None\n"
+      ))
+      idx = IndexFile(f)
+      assert "Helper" not in Names(idx, KIND_METHOD)
 
    def TestParametersIndexed(self, tmp_path):
       f = Write(tmp_path / "f.py", Src(

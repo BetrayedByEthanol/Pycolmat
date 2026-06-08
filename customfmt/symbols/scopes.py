@@ -156,6 +156,7 @@ class Scope:
    QualName      : str
    Line          : int
    Parent        : Scope | None
+   Col           : int                         = 0
    FilePath      : str                         = ""
    ScopeId       : str                         = ""
    Children      : list[Scope]                 = field(default_factory=list)

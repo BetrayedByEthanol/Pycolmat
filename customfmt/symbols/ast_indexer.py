@@ -71,6 +71,7 @@ class _Indexer(ast.NodeVisitor):
       # Track whether the current scope element is a class or function
       # so we know whether a nested def is a method or a function.
       self._scope_kind : list[str] = []  # "class" | "function"
+      self._class_stack: list[dict] = []
       # Track (line, col) positions already emitted as call/attribute_call
       # so the same Name node is not also emitted as name_read.
       self._call_sites : set[tuple[int, int]] = set()
@@ -112,6 +113,18 @@ class _Indexer(ast.NodeVisitor):
 
    def _InClass(self) -> bool:
       return bool(self._scope_kind) and self._scope_kind[-1] == "class"
+
+   def _CurrentClassExtra(self, method_name: str, is_async: bool) -> dict:
+      owner = self._class_stack[-1]
+      return {
+         "is_async":                   is_async,
+         "owner_class_name":           owner["name"],
+         "owner_class_qualified_name": owner["qualified_name"],
+         "owner_class_file":           owner["file"],
+         "owner_class_line":           owner["line"],
+         "owner_class_col":            owner["col"],
+         "method_name":                method_name,
+      }
 
    # -----------------------------------------------------------------------
    # Imports
@@ -159,13 +172,22 @@ class _Indexer(ast.NodeVisitor):
 
    def _VisitClassDef(self, node: ast.ClassDef) -> None:
       bases = {"bases": [ast.unparse(b) for b in node.bases]}
+      class_qualified_name = self._Qualified(node.name)
       self._Add(KIND_CLASS, node.name, node.lineno, node.col_offset, bases)
       self._scope.append(node.name)
       self._scope_kind.append("class")
+      self._class_stack.append({
+         "name":           node.name,
+         "qualified_name": class_qualified_name,
+         "file":           self._File,
+         "line":           node.lineno,
+         "col":            node.col_offset,
+      })
       # Visit class body
       for stmt in node.body:
          self._VisitClassBodyDecl(stmt)
       self.generic_visit(node)
+      self._class_stack.pop()
       self._scope.pop()
       self._scope_kind.pop()
 
@@ -188,8 +210,12 @@ class _Indexer(ast.NodeVisitor):
    def _VisitFuncDef(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
       is_method = self._InClass()
       kind      = KIND_METHOD if is_method else KIND_FUNCTION
-      is_async = {"is_async": isinstance(node, ast.AsyncFunctionDef)}
-      self._Add(kind, node.name, node.lineno, node.col_offset, is_async)
+      is_async  = isinstance(node, ast.AsyncFunctionDef)
+      extra = (
+         self._CurrentClassExtra(node.name, is_async)
+         if is_method else {"is_async": is_async}
+      )
+      self._Add(kind, node.name, node.lineno, node.col_offset, extra)
       self._scope.append(node.name)
       self._scope_kind.append("function")
       # Parameters
