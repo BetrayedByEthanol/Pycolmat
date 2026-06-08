@@ -119,9 +119,11 @@ report whether a project is ready for customfmt usage. The report includes:
 - Symbol tooling readiness from the indexer and resolver, including parse/file
   errors plus unresolved and dynamic reference counts. Normal unresolved
   references are summarized but do not fail doctor by themselves.
-- Package/import readiness, including regular packages with `__init__.py` and
-  namespace-package-like directories. Namespace-like directories produce a
-  warning because relative import resolution does not fully support them yet.
+- Package/import readiness, including regular packages with `__init__.py`,
+  namespace-package-like directories, and namespace package ambiguity
+  diagnostics. Namespace packages are supported conservatively when scanned
+  roots make module ancestry unambiguous; ambiguous namespace modules are
+  reported so `refs` and `rename-symbol` can leave them unresolved.
 
 Exit codes match the rest of the CLI: 0 means healthy/no blocking issues, 1
 means style or format issues were found, and 2 means discovery, parse,
@@ -257,6 +259,12 @@ Arbitrary attribute and dynamic patterns remain dynamic or unresolved rather
 than guessed:
 `obj.Method()`, `self.X`, `getattr()`, `globals()`, `importlib`, and string
 references are not resolved as project references.
+
+`customfmt.symbols.project_graph.InspectProjectModules(paths)` is the public
+module inspection API for callers that need to audit scanned module names before
+running project reference discovery. It returns each module name with candidate
+file paths, the normalized scan roots, discovery errors, and
+`ambiguous_modules` for names that have more than one in-scan candidate.
 
 Output is always JSON with `definitions`, `references`,
 `unresolved_references`, `dynamic_references`, `errors`, and `summary`. Every
