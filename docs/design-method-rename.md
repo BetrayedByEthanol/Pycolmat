@@ -277,6 +277,48 @@ If an override flag is ever allowed, it should follow the existing
 `--allow-incomplete` rule: apply-only, explicit, and rejected for JSON or diff
 modes.
 
+## Implementation Phases
+
+1. Resolver metadata only
+
+   - expose class-owned method definitions
+
+   - expose owning class metadata
+
+   - no rename behavior changes
+
+
+
+2. Read-only method refs
+
+   - report safe self/cls/ClassName.Method refs
+
+   - keep unsupported refs dynamic/unresolved
+
+   - no apply support
+
+
+
+3. Rename-symbol plan/diff
+
+   - emit guarded token edits for supported method refs
+
+   - diff only first
+
+   - no apply support until tests are strong
+
+
+
+4. Apply support
+
+   - reuse token renderer
+
+   - block incomplete plans by default
+
+   - require full test coverage before enabling
+
+
+
 ## Test Plan
 
 Future implementation should add focused tests before enabling apply support.
