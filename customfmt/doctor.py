@@ -17,7 +17,7 @@ from customfmt.formatter import ProcessFile
 from customfmt.indexer import IndexPaths
 from customfmt.io import UTF8_BOM, ReadUtf8Bytes
 from customfmt.symbols.model import FileError
-from customfmt.symbols.project_graph import _ModuleCandidates, _ScanRoots
+from customfmt.symbols.project_graph import InspectProjectModules
 from customfmt.symbols.resolver import ResolveFile
 from customfmt.types import Violation
 
@@ -373,7 +373,12 @@ def _InspectPackages(paths: list[str], files: list[Path]) -> dict:
    dirs_with_py = {path.parent for path in files}
    package_dirs = sorted(d for d in dirs_with_py if (d / "__init__.py").exists())
    namespace_like = sorted(d for d in dirs_with_py if d not in package_dirs)
-   ambiguous_modules = _AmbiguousNamespaceModules(paths, files, namespace_like)
+   module_info = InspectProjectModules(paths)
+   namespace_files = {str(path) for path in files if path.parent in namespace_like}
+   ambiguous_modules = [
+      module_name for module_name in module_info["ambiguous_modules"]
+      if any(path in namespace_files for path in module_info["modules"][module_name])
+   ]
    warnings: list[str] = []
    if ambiguous_modules:
       modules = ", ".join(ambiguous_modules[:EXAMPLE_LIMIT])
@@ -394,25 +399,6 @@ def _InspectPackages(paths: list[str], files: list[Path]) -> dict:
       ),
       "warnings":                   warnings,
    }
-
-
-def _AmbiguousNamespaceModules(
-   paths: list[str], files: list[Path], namespace_like: list[Path]
-) -> list[str]:
-   namespace_set = set(namespace_like)
-   scan_roots = _ScanRoots(paths)
-   seen: dict[str, Path] = {}
-   ambiguous: set[str] = set()
-   for path in files:
-      if path.parent not in namespace_set:
-         continue
-      for module in _ModuleCandidates(path, scan_roots):
-         existing = seen.get(module)
-         if existing is None:
-            seen[module] = path
-         elif existing != path:
-            ambiguous.add(module)
-   return sorted(ambiguous)
 
 
 def _AppendFileExamples(lines: list[str], paths: list[str], label: str) -> None:
