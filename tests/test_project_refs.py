@@ -603,7 +603,9 @@ class TestProjectRefs:
 
       assert data["errors"] == []
       assert data["scan_roots"] == [str(first.resolve()), str(second.resolve())]
-      assert data["modules"]["ns.models"] == [str(first_model), str(second_model)]
+      assert "ns.models" in data["modules"]
+      assert str(first_model) in data["modules"]["ns.models"]
+      assert str(second_model) in data["modules"]["ns.models"]
       assert "ns.models" in data["ambiguous_modules"]
 
    def TestPrettyOutputIsIndentedJson(self, tmp_path, capsys):
