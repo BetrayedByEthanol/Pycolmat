@@ -148,13 +148,14 @@ def _BuildParser(prog: str = "customfmt") -> argparse.ArgumentParser:
       ),
    )
    doc_p.add_argument("paths", nargs="+", metavar="PATH", help="Files or directories to inspect.")
-   doc_p.add_argument(
+   doc_output = doc_p.add_mutually_exclusive_group()
+   doc_output.add_argument(
       "--json",
       action="store_true",
       dest="json_out",
       help="Output diagnostics as compact JSON.",
    )
-   doc_p.add_argument(
+   doc_output.add_argument(
       "--pretty",
       action="store_true",
       help="Output diagnostics as indented JSON.",

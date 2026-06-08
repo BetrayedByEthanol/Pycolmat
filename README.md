@@ -110,8 +110,8 @@ existing discovery, checker, auto-fix check, indexer, and resolver behavior to
 report whether a project is ready for customfmt usage. The report includes:
 
 - Python file discovery counts, with no Python files reported as exit code 2.
-- Encoding and line-ending diagnostics for invalid UTF-8, UTF-8 BOM, CRLF, and
-  bare CR files.
+- Encoding and line-ending diagnostics for invalid UTF-8, I/O read errors,
+  UTF-8 BOM, CRLF, and bare CR files.
 - customfmt rule status grouped by rule code, including a few example
   violations for each rule.
 - Auto-fix readiness for CF009, CF011, CF013, CF018, and CF019 without writing
@@ -125,7 +125,7 @@ report whether a project is ready for customfmt usage. The report includes:
 
 Exit codes match the rest of the CLI: 0 means healthy/no blocking issues, 1
 means style or format issues were found, and 2 means discovery, parse,
-encoding, or tool/runtime errors were found.
+encoding, I/O, or tool/runtime errors were found.
 
 ---
 

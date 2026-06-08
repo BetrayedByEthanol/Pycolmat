@@ -123,3 +123,42 @@ class TestDoctor:
       assert rc == 0
       assert data["package_readiness"]["namespace_like_count"] == 1
       assert data["package_readiness"]["warnings"]
+
+   def TestEncodingIoErrorsHaveSeparateJsonBucket(self, tmp_path, capsys, monkeypatch):
+      f = Write(tmp_path / "my_module.py", "X = 1\n")
+
+      def RaiseIoError(path):
+         if path == f:
+            raise OSError("permission denied")
+         return path.read_bytes()
+
+      monkeypatch.setattr("customfmt.doctor.ReadUtf8Bytes", RaiseIoError)
+
+      rc = RunDoctor("--json", str(f))
+      data = json.loads(capsys.readouterr().out)
+
+      assert rc == 2
+      assert data["encoding"]["non_utf8_count"] == 0
+      assert data["encoding"]["non_utf8_files"] == []
+      assert data["encoding"]["io_error_count"] == 1
+      assert data["encoding"]["io_error_files"] == [str(f)]
+      assert data["exit_code"] == 2
+
+   def TestEncodingIoErrorsAppearInHumanOutput(self, tmp_path, capsys, monkeypatch):
+      f = Write(tmp_path / "my_module.py", "X = 1\n")
+
+      def RaiseIoError(path):
+         if path == f:
+            raise OSError("permission denied")
+         return path.read_bytes()
+
+      monkeypatch.setattr("customfmt.doctor.ReadUtf8Bytes", RaiseIoError)
+
+      rc = RunDoctor(str(f))
+      out = capsys.readouterr().out
+
+      assert rc == 2
+      assert "io_errors: 1" in out
+      assert "io_error_files:" in out
+      assert str(f) in out
+      assert "non_utf8: 0" in out
