@@ -235,6 +235,20 @@ class TestRenameSymbolPlan:
       assert data == {}
       assert "unsupported" in err
 
+   def TestMethodMetadataDoesNotEnableMethodRenameBySymbol(self, tmp_path):
+      original = "class Repo:\n   def GetByID(self):\n      pass\n"
+      f = Write(tmp_path / "main.py", original)
+      out = StringIO()
+      err = StringIO()
+
+      with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+         rc = Main(["rename-symbol", str(f), "--symbol", f"{f}:2:3", "--to", "FindByID"])
+
+      assert rc == 2
+      assert out.getvalue() == ""
+      assert "unsupported" in err.getvalue() or "not supported" in err.getvalue()
+      assert f.read_text(encoding="utf-8") == original
+
    def TestClassAttributeRenameRejected(self, tmp_path):
       f = Write(
          tmp_path / "main.py",
