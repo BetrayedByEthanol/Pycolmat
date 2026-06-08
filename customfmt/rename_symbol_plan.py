@@ -161,6 +161,8 @@ def _ChooseTarget(
       canonical = _CanonicalTargets(refs)
       if selected is not None and selected.Kind in SUPPORTED_TARGET_KINDS:
          return selected
+      if selected is not None:
+         raise ValueError(f"unsupported symbol kind for project rename: {selected.Kind}")
       if len(canonical) == 1:
          return canonical[0]
       raise ValueError("symbol does not identify a supported project symbol")
