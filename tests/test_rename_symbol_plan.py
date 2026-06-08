@@ -217,6 +217,24 @@ class TestRenameSymbolPlan:
       assert data == {}
       assert "supported project symbol" in err
 
+   def TestMethodRenameBySymbolRejected(self, tmp_path):
+      f = Write(
+         tmp_path / "main.py",
+         Src(
+            '''
+            class UserModel:
+               def BuildValue(self):
+                  return 1
+            '''
+         ),
+      )
+
+      rc, data, err = RunPlan(f, "--symbol", f"{f}:3:3", "--to", "MakeValue")
+
+      assert rc == 2
+      assert data == {}
+      assert "unsupported" in err
+
    def TestClassAttributeRenameRejected(self, tmp_path):
       f = Write(
          tmp_path / "main.py",

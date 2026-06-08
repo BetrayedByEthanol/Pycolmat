@@ -5,6 +5,7 @@
 - Added namespace package support for project refs in conservatively resolved, unambiguous scanned roots.
 - Added namespace package support for `rename-symbol` diff/apply when scanned roots make the import target unambiguous.
 - Added the public `InspectProjectModules` module inspection API.
+- Added resolver/index metadata for direct class-body methods: method definitions now record `kind: "method"` and include owning class metadata. This is metadata only; `rename-symbol` method rename targets remain unsupported.
 - Added `customfmt doctor` diagnostics for namespace package ambiguity.
 
 ## v0.1.0 - 2026-06-05

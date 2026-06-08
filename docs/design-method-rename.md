@@ -2,9 +2,14 @@
 
 ## Status
 
-This document is a design note only. It describes future support for method
-renames in `customfmt rename-symbol`; it does not change runtime behavior,
-resolver behavior, CLI flags, or the current rename safety rules.
+This document is a design note for conservative method rename support. Phase 1
+resolver/index metadata is implemented: direct class-body method definitions are
+reported as `kind: "method"` and include owning class metadata.
+
+`customfmt rename-symbol` still does not support method targets. The Phase 1
+metadata is read-only/planning groundwork only and does not add method rename
+planning, self/cls method reference inference, CLI flags, or changes to the
+current rename safety rules.
 
 ## Goals
 
@@ -279,13 +284,16 @@ modes.
 
 ## Implementation Phases
 
-1. Resolver metadata only (Phase 1 implemented)
+1. Resolver metadata only (implemented)
 
-   - expose class-owned method definitions in indexer and resolver output
+   - direct class-body methods are exposed in indexer and resolver output as
+     `kind: "method"`
 
-   - expose owning class metadata in definition `extra` fields
+   - method definitions expose owning class metadata in definition `extra`
+     fields
 
-   - no rename behavior changes
+   - `rename-symbol` method targets remain unsupported; this phase makes no
+     rename behavior changes
 
 
 
