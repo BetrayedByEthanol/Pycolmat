@@ -100,6 +100,7 @@ def DoctorPaths(paths: list[str]) -> DoctorReport:
 
    blocking = bool(
       report.Encoding["non_utf8_count"]
+      or report.Encoding["io_error_count"]
       or report.Encoding["utf8_bom_count"]
       or report.SymbolReadiness["index_errors"]
       or report.SymbolReadiness["resolver_errors"]
@@ -136,10 +137,12 @@ def FormatHuman(report: DoctorReport) -> str:
    enc = report.Encoding
    lines.append("Encoding / line endings")
    lines.append(f"  non_utf8: {enc.get('non_utf8_count', 0)}")
+   lines.append(f"  io_errors: {enc.get('io_error_count', 0)}")
    lines.append(f"  utf8_bom: {enc.get('utf8_bom_count', 0)}")
    lines.append(f"  crlf: {enc.get('crlf_count', 0)}")
    lines.append(f"  bare_cr: {enc.get('bare_cr_count', 0)}")
    _AppendFileExamples(lines, enc.get("non_utf8_files", []), "non_utf8_files")
+   _AppendFileExamples(lines, enc.get("io_error_files", []), "io_error_files")
    _AppendFileExamples(lines, enc.get("utf8_bom_files", []), "utf8_bom_files")
    _AppendFileExamples(lines, enc.get("crlf_files", []), "crlf_files")
    _AppendFileExamples(lines, enc.get("bare_cr_files", []), "bare_cr_files")
@@ -198,9 +201,11 @@ def FormatHuman(report: DoctorReport) -> str:
 
 def _FillEmptySections(report: DoctorReport) -> None:
    report.Encoding = {
-      "non_utf8_count":  0,
-      "non_utf8_files":  [],
-      "utf8_bom_count": 0,
+      "non_utf8_count":   0,
+      "non_utf8_files":   [],
+      "io_error_count":  0,
+      "io_error_files":  [],
+      "utf8_bom_count":  0,
       "utf8_bom_files": [],
       "crlf_count":     0,
       "crlf_files":     [],
@@ -237,6 +242,7 @@ def _FillEmptySections(report: DoctorReport) -> None:
 
 def _InspectEncoding(files: list[Path]) -> dict:
    non_utf8_files: list[str] = []
+   io_error_files: list[str] = []
    bom_files: list[str] = []
    crlf_files: list[str] = []
    bare_cr_files: list[str] = []
@@ -245,7 +251,7 @@ def _InspectEncoding(files: list[Path]) -> dict:
       try:
          raw = ReadUtf8Bytes(path)
       except OSError:
-         non_utf8_files.append(str(path))
+         io_error_files.append(str(path))
          continue
       check_raw = raw
       if raw.startswith(UTF8_BOM):
@@ -263,9 +269,11 @@ def _InspectEncoding(files: list[Path]) -> dict:
          bare_cr_files.append(str(path))
 
    return {
-      "non_utf8_count":  len(non_utf8_files),
-      "non_utf8_files":  non_utf8_files,
-      "utf8_bom_count": len(bom_files),
+      "non_utf8_count":   len(non_utf8_files),
+      "non_utf8_files":   non_utf8_files,
+      "io_error_count":  len(io_error_files),
+      "io_error_files":  io_error_files,
+      "utf8_bom_count":  len(bom_files),
       "utf8_bom_files": bom_files,
       "crlf_count":     len(crlf_files),
       "crlf_files":     crlf_files,

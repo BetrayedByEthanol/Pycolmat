@@ -18,6 +18,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from customfmt.cli import Main, MainCheck, MainFix
 
 # ---------------------------------------------------------------------------
@@ -242,6 +244,23 @@ class TestCheck:
       assert len(parts) >= 3
       loc = parts[0]  # path:line:col
       assert loc.count(":") >= 2
+
+
+# ---------------------------------------------------------------------------
+# customfmt doctor argument parsing
+# ---------------------------------------------------------------------------
+
+
+class TestDoctorCli:
+   def TestJsonAndPrettyAreMutuallyExclusive(self, tmp_path):
+      src = tmp_path / "src"
+      src.mkdir()
+      Write(src / "my_module.py", "X = 1\n")
+
+      with pytest.raises(SystemExit) as exc_info:
+         Run("doctor", str(src), "--json", "--pretty")
+
+      assert exc_info.value.code == 2
 
 
 # ---------------------------------------------------------------------------
