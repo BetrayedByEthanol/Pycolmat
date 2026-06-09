@@ -975,6 +975,139 @@ class TestResolverExisting:
       assert dynamic
 
 
+class TestSameClassMethodReferences:
+   def AttrRef(self, result, name: str):
+      return next(
+         r for r in result.References
+         if r.Name == name and r.Kind == RefKind.AttrCall
+      )
+
+   def TestSelfMethodInsideSameClassResolvesToMethodDef(self, tmp_path):
+      src = Src("""\
+         class Repo:
+            def Build(self):
+               return self.Helper()
+
+            def Helper(self):
+               return 1
+      """)
+      f = Write(tmp_path / "f.py", src)
+      result = ResolveFile(f)
+      ref = self.AttrRef(result, "Helper")
+
+      assert not ref.IsDynamic
+      assert ref.ResolvedTo is not None
+      assert ref.ResolvedTo.Kind == DefKind.MethodDef
+      assert ref.Extra["receiver_kind"] == "self"
+      assert ref.Extra["owner_class_name"] == "Repo"
+      assert ref.Extra["owner_class_qualified_name"] == "Repo"
+      assert ref.Extra["method_name"] == "Helper"
+
+   def TestClsMethodInsideSameClassResolvesToMethodDef(self, tmp_path):
+      src = Src("""\
+         class Repo:
+            def Build(cls):
+               return cls.Helper()
+
+            def Helper(cls):
+               return 1
+      """)
+      f = Write(tmp_path / "f.py", src)
+      result = ResolveFile(f)
+      ref = self.AttrRef(result, "Helper")
+
+      assert not ref.IsDynamic
+      assert ref.ResolvedTo is not None
+      assert ref.ResolvedTo.Kind == DefKind.MethodDef
+      assert ref.Extra["receiver_kind"] == "cls"
+      assert ref.Extra["owner_class_name"] == "Repo"
+      assert ref.Extra["owner_class_qualified_name"] == "Repo"
+      assert ref.Extra["method_name"] == "Helper"
+
+   def TestObjMethodRemainsDynamic(self, tmp_path):
+      src = Src("""\
+         class Repo:
+            def Build(self, obj):
+               return obj.Helper()
+
+            def Helper(self):
+               return 1
+      """)
+      f = Write(tmp_path / "f.py", src)
+      result = ResolveFile(f)
+      ref = self.AttrRef(result, "Helper")
+
+      assert ref.IsDynamic
+      assert ref.ResolvedTo is None
+
+   def TestSelfMethodWithDifferentFirstParameterRemainsDynamic(self, tmp_path):
+      src = Src("""\
+         class Repo:
+            def Build(this):
+               return self.Helper()
+
+            def Helper(self):
+               return 1
+      """)
+      f = Write(tmp_path / "f.py", src)
+      result = ResolveFile(f)
+      ref = self.AttrRef(result, "Helper")
+
+      assert ref.IsDynamic
+      assert ref.ResolvedTo is None
+
+   def TestNestedFunctionSelfMethodRemainsDynamic(self, tmp_path):
+      src = Src("""\
+         class Repo:
+            def Build(self):
+               def Inner():
+                  return self.Helper()
+               return Inner()
+
+            def Helper(self):
+               return 1
+      """)
+      f = Write(tmp_path / "f.py", src)
+      result = ResolveFile(f)
+      ref = self.AttrRef(result, "Helper")
+
+      assert ref.IsDynamic
+      assert ref.ResolvedTo is None
+      assert ref.ScopeRef.Name == "Inner"
+
+   def TestLambdaSelfMethodRemainsDynamic(self, tmp_path):
+      src = Src("""\
+         class Repo:
+            def Build(self):
+               return lambda: self.Helper()
+
+            def Helper(self):
+               return 1
+      """)
+      f = Write(tmp_path / "f.py", src)
+      result = ResolveFile(f)
+      ref = self.AttrRef(result, "Helper")
+
+      assert ref.IsDynamic
+      assert ref.ResolvedTo is None
+
+   def TestSuperMethodRemainsDynamic(self, tmp_path):
+      src = Src("""\
+         class Repo:
+            def Build(self):
+               return super().Helper()
+
+            def Helper(self):
+               return 1
+      """)
+      f = Write(tmp_path / "f.py", src)
+      result = ResolveFile(f)
+      ref = self.AttrRef(result, "Helper")
+
+      assert ref.IsDynamic
+      assert ref.ResolvedTo is None
+
+
 # ---------------------------------------------------------------------------
 # TestExceptAlias — except-as target global/nonlocal awareness
 # ---------------------------------------------------------------------------

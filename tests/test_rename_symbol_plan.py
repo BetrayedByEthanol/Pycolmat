@@ -217,6 +217,27 @@ class TestRenameSymbolPlan:
       assert data == {}
       assert "supported project symbol" in err
 
+   def TestMethodRenameWithSameClassSelfReferenceRejected(self, tmp_path):
+      f = Write(
+         tmp_path / "main.py",
+         Src(
+            '''
+            class UserModel:
+               def BuildValue(self):
+                  return self.Helper()
+
+               def Helper(self):
+                  return 1
+            '''
+         ),
+      )
+
+      rc, data, err = RunPlan(f, "--name", "Helper", "--to", "MakeValue")
+
+      assert rc == 2
+      assert data == {}
+      assert "supported project symbol" in err
+
    def TestMethodRenameBySymbolRejected(self, tmp_path):
       f = Write(
          tmp_path / "main.py",

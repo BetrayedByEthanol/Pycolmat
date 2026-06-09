@@ -195,6 +195,25 @@ class _Resolver(ast.NodeVisitor):
          "method_name":                method_name,
       }
 
+   def _SameClassMethodExtra(self, receiver: str, method_name: str) -> dict | None:
+      cur = self._Current
+      if cur.Kind != ScopeKind.Function:
+         return None
+      if cur.OwnerClassScope is None:
+         return None
+      if cur.FirstParamName != receiver:
+         return None
+      if receiver not in ("self", "cls"):
+         return None
+      owner = cur.OwnerClassScope
+      return {
+         "full":                       f"{receiver}.{method_name}",
+         "receiver_kind":              receiver,
+         "owner_class_name":           owner.Name,
+         "owner_class_qualified_name": owner.QualName,
+         "method_name":                method_name,
+      }
+
    def _AddRef(
       self,
       name: str,
@@ -450,13 +469,18 @@ class _Resolver(ast.NodeVisitor):
       self._AddDef(node.name, kind, node.lineno, node.col_offset, extra)
       # Decorators are walked in the OUTER scope before pushing.
       self._RecordDecorators(node)
-      self._PushScope(
+      func_scope = self._PushScope(
          ScopeKind.Function, node.name, node.lineno, node.col_offset
       )
       # Parameters (including annotations) — recorded inside the function scope.
       args = node.args
+      positional_args = args.posonlyargs + args.args
+      func_scope.OwnerClassScope = cur if is_method else None
+      func_scope.FirstParamName = (
+         positional_args[0].arg if positional_args else None
+      )
       all_args = (
-         args.posonlyargs + args.args + args.kwonlyargs
+         positional_args + args.kwonlyargs
          + ([args.vararg] if args.vararg else [])
          + ([args.kwarg]  if args.kwarg  else [])
       )
@@ -513,9 +537,13 @@ class _Resolver(ast.NodeVisitor):
       """Walk an expression subtree and emit Read/Call/AttrCall references."""
       if node is None:
          return
+      lambda_attr_calls = self._LambdaAttributeCallPositions(node)
       for child in ast.walk(node):
          if isinstance(child, ast.Call):
-            self._RecordCall(child)
+            self._RecordCall(
+               child,
+               force_dynamic=self._CallPosition(child) in lambda_attr_calls,
+            )
          elif isinstance(child, ast.Name) and isinstance(child.ctx, ast.Load):
             pos = (child.lineno, child.col_offset)
             if pos not in self._CallSites:
@@ -524,11 +552,45 @@ class _Resolver(ast.NodeVisitor):
                   child.lineno, child.col_offset,
                )
 
-   def _RecordCall(self, node: ast.Call) -> None:
+   def _CallPosition(self, node: ast.Call) -> tuple[int, int]:
+      func = node.func
+      return (
+         getattr(func, "lineno", node.lineno),
+         getattr(func, "col_offset", node.col_offset),
+      )
+
+   def _LambdaAttributeCallPositions(self, node: ast.expr) -> set[tuple[int, int]]:
+      positions: set[tuple[int, int]] = set()
+      for child in ast.walk(node):
+         if not isinstance(child, ast.Lambda):
+            continue
+         for lambda_child in ast.walk(child.body):
+            if isinstance(lambda_child, ast.Call):
+               if isinstance(lambda_child.func, ast.Attribute):
+                  positions.add(self._CallPosition(lambda_child))
+      return positions
+
+   def _RecordCall(self, node: ast.Call, *, force_dynamic: bool = False) -> None:
       match node.func:
          case ast.Name(id=name, lineno=ln, col_offset=co):
             call_extra = {"args": len(node.args)}
             self._AddRef(name, RefKind.Call, ln, co, extra=call_extra)
+            self._CallSites.add((ln, co))
+         case ast.Attribute(
+            attr=attr, value=ast.Name(id=receiver), lineno=ln, col_offset=co
+         ):
+            full = ast.unparse(node.func)
+            attr_extra = {"full": full}
+            safe_extra = (
+               None if force_dynamic
+               else self._SameClassMethodExtra(receiver, attr)
+            )
+            if safe_extra is not None:
+               attr_extra = safe_extra
+            self._AddRef(
+               attr, RefKind.AttrCall, ln, co,
+               dynamic=safe_extra is None, extra=attr_extra,
+            )
             self._CallSites.add((ln, co))
          case ast.Attribute(attr=attr, lineno=ln, col_offset=co):
             full = ast.unparse(node.func)
@@ -596,8 +658,20 @@ class _Resolver(ast.NodeVisitor):
       Second pass: resolve each non-dynamic reference using ResolveName.
       global/nonlocal semantics are handled inside Scope.ResolveName.
       """
+      method_map = self._DirectMethodMap()
       for ref in self._AllRefs:
          if ref.IsDynamic:
+            continue
+         if ref.Kind == RefKind.AttrCall:
+            method_key = (
+               str(ref.Extra.get("owner_class_qualified_name", "")),
+               ref.Name,
+            )
+            method_def = method_map.get(method_key)
+            if method_def is not None:
+               ref.ResolvedTo = method_def
+            else:
+               ref.IsDynamic = True
             continue
          # Write refs (global/nonlocal assignments) are resolved
          # the same way as reads — through the scope chain.
@@ -606,6 +680,14 @@ class _Resolver(ast.NodeVisitor):
             ref.ResolvedTo = defn
          else:
             ref.IsUnresolved = True
+
+   def _DirectMethodMap(self) -> dict[tuple[str, str], Definition]:
+      method_map: dict[tuple[str, str], Definition] = {}
+      for defn in self._AllDefs:
+         if defn.Kind != DefKind.MethodDef:
+            continue
+         method_map.setdefault((defn.ScopeRef.QualName, defn.Name), defn)
+      return method_map
 
    # -----------------------------------------------------------------------
    # Build
