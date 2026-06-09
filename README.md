@@ -210,7 +210,10 @@ customfmt resolve --output resolve.json src/
 Output is JSON with a `files` array and an `errors` array.  Each file entry
 contains `scopes`, `definitions`, `references`, and a `summary`.  References
 include a `resolved_to` field when the name was resolved within the file, and
-an `unresolved` flag when no definition was found.
+an `unresolved` flag when no definition was found. Same-class `self.Method()`
+and `cls.Method()` calls resolve only inside direct class-owned methods whose
+first parameter is respectively `self` or `cls`, and only when the target is a
+direct method on that same class. Other attribute calls stay dynamic.
 
 
 ---
@@ -257,8 +260,9 @@ attribute calls such as `module.Foo()` may be reported as `import_resolved` when
 `module` is a supported local import and `Foo` is found in the imported module.
 Arbitrary attribute and dynamic patterns remain dynamic or unresolved rather
 than guessed:
-`obj.Method()`, `self.X`, `getattr()`, `globals()`, `importlib`, and string
-references are not resolved as project references.
+`obj.Method()`, `self.X`, `super().Method()`, inherited methods, `getattr()`,
+`globals()`, `importlib`, and string references are not resolved as project
+references.
 
 `customfmt.symbols.project_graph.InspectProjectModules(paths)` is the public
 module inspection API for callers that need to audit scanned module names before
@@ -371,11 +375,11 @@ unresolved, or dynamic when detected:
 | Pattern | Status | Notes |
 |---------|--------|-------|
 | Local variables | Unsupported | Use `customfmt rename` for local variable cleanup. |
-| Methods | Unsupported | Do not rename method definitions with `rename-symbol`. |
+| Methods | Unsupported | Do not rename method definitions with `rename-symbol`, including same-class `self.Method()` or `cls.Method()` references that the read-only resolver can identify. |
 | Instance attributes | Unsupported | Includes direct attribute definitions and reads. |
 | Class attributes | Unsupported | Class-body declarations are not project-wide rename targets. |
-| `self.X` | Unsupported | Treated as dynamic/attribute-based. |
-| `obj.Method()` | Unsupported | Dynamic attribute calls are not guessed. |
+| `self.X` | Unsupported | Treated as dynamic/attribute-based unless it is a safe same-class `self.Method()` resolver reference, which is still not a rename target. |
+| `obj.Method()` / `super().Method()` | Unsupported | Dynamic attribute calls, inherited methods, and MRO lookups are not guessed. |
 | Wildcard imports | Unsupported | `from module import *` references stay unresolved for rename purposes. |
 | Unresolved imports | Unsupported | Relative imports outside scanned paths, relative imports beyond the package root, ambiguous namespace-package cases, ambiguous imports, or missing targets stay unresolved and block apply by default. |
 | String references | Unsupported | Strings are never rewritten. |

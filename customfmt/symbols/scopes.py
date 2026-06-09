@@ -151,19 +151,21 @@ def _MakeScopeId(file_path: str, qual_name: str, line: int) -> str:
 class Scope:
    """One lexical scope."""
 
-   Kind          : ScopeKind
-   Name          : str
-   QualName      : str
-   Line          : int
-   Parent        : Scope | None
-   Col           : int                         = 0
-   FilePath      : str                         = ""
-   ScopeId       : str                         = ""
-   Children      : list[Scope]                 = field(default_factory=list)
-   Defs          : dict[str, list[Definition]] = field(default_factory=dict)
-   Refs          : list[Reference]             = field(default_factory=list)
-   GlobalNames   : set[str]                    = field(default_factory=set)
-   NonlocalNames : set[str]                    = field(default_factory=set)
+   Kind            : ScopeKind
+   Name            : str
+   QualName        : str
+   Line            : int
+   Parent          : Scope | None
+   Col             : int                         = 0
+   FilePath        : str                         = ""
+   ScopeId         : str                         = ""
+   Children        : list[Scope]                 = field(default_factory=list)
+   Defs            : dict[str, list[Definition]] = field(default_factory=dict)
+   Refs            : list[Reference]             = field(default_factory=list)
+   GlobalNames     : set[str]                    = field(default_factory=set)
+   NonlocalNames   : set[str]                    = field(default_factory=set)
+   OwnerClassScope : Scope | None                = None
+   FirstParamName  : str | None                  = None
 
    def __post_init__(self) -> None:
       if not self.ScopeId:
@@ -239,8 +241,12 @@ class Scope:
          "qual_name":     self.QualName,
          "line":          self.Line,
          "parent_id":     self.Parent.ScopeId if self.Parent else None,
-         "global_names":  sorted(self.GlobalNames),
-         "nonlocal_names": sorted(self.NonlocalNames),
+         "global_names":      sorted(self.GlobalNames),
+         "nonlocal_names":   sorted(self.NonlocalNames),
+         "owner_class_id":   (
+            self.OwnerClassScope.ScopeId if self.OwnerClassScope else None
+         ),
+         "first_param_name": self.FirstParamName,
          "defs": {
             n: [df.ToDict() for df in dfl]
             for n, dfl in self.Defs.items()
