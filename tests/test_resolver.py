@@ -70,6 +70,17 @@ TestResolverExisting
    TestSelfXNotResolved
    TestAttrCallMarkedDynamic
 
+TestSameClassMethodReferences
+   TestSelfMethodInsideSameClassResolvesToMethodDef
+   TestClsMethodInsideSameClassResolvesToMethodDef
+   TestObjMethodRemainsDynamic
+   TestSelfMethodWithDifferentFirstParameterRemainsDynamic
+   TestClsMethodWithDifferentFirstParameterRemainsDynamic
+   TestNestedFunctionSelfMethodRemainsDynamic
+   TestLambdaSelfMethodRemainsDynamic
+   TestSuperMethodRemainsDynamic
+   TestSelfMissingMethodRemainsDynamic
+
 TestCLI
    TestResolveSubcommandOutputIsJson
    TestResolveIndexAliasWorks
@@ -995,7 +1006,8 @@ class TestSameClassMethodReferences:
       result = ResolveFile(f)
       ref = self.AttrRef(result, "Helper")
 
-      assert not ref.IsDynamic
+      assert ref.Kind == RefKind.AttrCall
+      assert ref.IsDynamic is False
       assert ref.ResolvedTo is not None
       assert ref.ResolvedTo.Kind == DefKind.MethodDef
       assert ref.Extra["receiver_kind"] == "self"
@@ -1003,7 +1015,7 @@ class TestSameClassMethodReferences:
       assert ref.Extra["owner_class_qualified_name"] == "Repo"
       assert ref.Extra["method_name"] == "Helper"
       assert ref.Extra["method_target"]["name"] == "Helper"
-      assert ref.Extra["method_target"]["kind"] == DefKind.MethodDef.value
+      assert ref.Extra["method_target"]["kind"] == "method"
       assert ref.Extra["method_target"]["line"] == 5
 
    def TestClsMethodInsideSameClassResolvesToMethodDef(self, tmp_path):
@@ -1019,7 +1031,8 @@ class TestSameClassMethodReferences:
       result = ResolveFile(f)
       ref = self.AttrRef(result, "Helper")
 
-      assert not ref.IsDynamic
+      assert ref.Kind == RefKind.AttrCall
+      assert ref.IsDynamic is False
       assert ref.ResolvedTo is not None
       assert ref.ResolvedTo.Kind == DefKind.MethodDef
       assert ref.Extra["receiver_kind"] == "cls"
@@ -1027,7 +1040,7 @@ class TestSameClassMethodReferences:
       assert ref.Extra["owner_class_qualified_name"] == "Repo"
       assert ref.Extra["method_name"] == "Helper"
       assert ref.Extra["method_target"]["name"] == "Helper"
-      assert ref.Extra["method_target"]["kind"] == DefKind.MethodDef.value
+      assert ref.Extra["method_target"]["kind"] == "method"
       assert ref.Extra["method_target"]["line"] == 5
 
    def TestObjMethodRemainsDynamic(self, tmp_path):
@@ -1043,7 +1056,8 @@ class TestSameClassMethodReferences:
       result = ResolveFile(f)
       ref = self.AttrRef(result, "Helper")
 
-      assert ref.IsDynamic
+      assert ref.Kind == RefKind.AttrCall
+      assert ref.IsDynamic is True
       assert ref.ResolvedTo is None
 
    def TestSelfMethodWithDifferentFirstParameterRemainsDynamic(self, tmp_path):
@@ -1059,7 +1073,8 @@ class TestSameClassMethodReferences:
       result = ResolveFile(f)
       ref = self.AttrRef(result, "Helper")
 
-      assert ref.IsDynamic
+      assert ref.Kind == RefKind.AttrCall
+      assert ref.IsDynamic is True
       assert ref.ResolvedTo is None
 
    def TestClsMethodWithDifferentFirstParameterRemainsDynamic(self, tmp_path):
@@ -1075,7 +1090,8 @@ class TestSameClassMethodReferences:
       result = ResolveFile(f)
       ref = self.AttrRef(result, "Helper")
 
-      assert ref.IsDynamic
+      assert ref.Kind == RefKind.AttrCall
+      assert ref.IsDynamic is True
       assert ref.ResolvedTo is None
 
    def TestNestedFunctionSelfMethodRemainsDynamic(self, tmp_path):
@@ -1093,7 +1109,8 @@ class TestSameClassMethodReferences:
       result = ResolveFile(f)
       ref = self.AttrRef(result, "Helper")
 
-      assert ref.IsDynamic
+      assert ref.Kind == RefKind.AttrCall
+      assert ref.IsDynamic is True
       assert ref.ResolvedTo is None
       assert ref.ScopeRef.Name == "Inner"
 
@@ -1110,7 +1127,8 @@ class TestSameClassMethodReferences:
       result = ResolveFile(f)
       ref = self.AttrRef(result, "Helper")
 
-      assert ref.IsDynamic
+      assert ref.Kind == RefKind.AttrCall
+      assert ref.IsDynamic is True
       assert ref.ResolvedTo is None
 
    def TestSuperMethodRemainsDynamic(self, tmp_path):
@@ -1126,7 +1144,8 @@ class TestSameClassMethodReferences:
       result = ResolveFile(f)
       ref = self.AttrRef(result, "Helper")
 
-      assert ref.IsDynamic
+      assert ref.Kind == RefKind.AttrCall
+      assert ref.IsDynamic is True
       assert ref.ResolvedTo is None
 
    def TestSelfMissingMethodRemainsDynamic(self, tmp_path):
@@ -1142,7 +1161,8 @@ class TestSameClassMethodReferences:
       result = ResolveFile(f)
       ref = self.AttrRef(result, "MissingMethod")
 
-      assert ref.IsDynamic
+      assert ref.Kind == RefKind.AttrCall
+      assert ref.IsDynamic is True
       assert ref.ResolvedTo is None
       assert ref.Extra["receiver_kind"] == "self"
       assert ref.Extra["owner_class_name"] == "Repo"
