@@ -214,6 +214,21 @@ class _Resolver(ast.NodeVisitor):
          "method_name":                method_name,
       }
 
+   def _ClassQualifiedName(self, defn: Definition) -> str:
+      scope = defn.ScopeRef
+      return f"{scope.QualName}.{defn.Name}" if scope.QualName else defn.Name
+
+   def _ClassMethodExtra(
+      self, class_def: Definition, method_name: str
+   ) -> dict:
+      return {
+         "full":                       f"{class_def.Name}.{method_name}",
+         "receiver_kind":              "class",
+         "owner_class_name":           class_def.Name,
+         "owner_class_qualified_name": self._ClassQualifiedName(class_def),
+         "method_name":                method_name,
+      }
+
    def _AddRef(
       self,
       name: str,
@@ -585,11 +600,19 @@ class _Resolver(ast.NodeVisitor):
                None if force_dynamic
                else self._SameClassMethodExtra(receiver, attr)
             )
+            is_class_candidate = (
+               not force_dynamic
+               and safe_extra is None
+               and receiver not in ("self", "cls")
+            )
             if safe_extra is not None:
                attr_extra = safe_extra
+            elif is_class_candidate:
+               attr_extra["_receiver_name"] = receiver
             self._AddRef(
                attr, RefKind.AttrCall, ln, co,
-               dynamic=safe_extra is None, extra=attr_extra,
+               dynamic=safe_extra is None and not is_class_candidate,
+               extra=attr_extra,
             )
             self._CallSites.add((ln, co))
          case ast.Attribute(attr=attr, lineno=ln, col_offset=co):
@@ -663,16 +686,9 @@ class _Resolver(ast.NodeVisitor):
          if ref.IsDynamic:
             continue
          if ref.Kind == RefKind.AttrCall:
-            method_key = (
-               str(ref.Extra.get("owner_class_qualified_name", "")),
-               ref.Name,
-            )
-            method_def = method_map.get(method_key)
-            if method_def is not None:
-               ref.ResolvedTo = method_def
-               ref.Extra["method_target"] = self._MethodTargetExtra(method_def)
-            else:
-               ref.IsDynamic = True
+            if self._ResolveAttrCall(ref, method_map):
+               continue
+            ref.IsDynamic = True
             continue
          # Write refs (global/nonlocal assignments) are resolved
          # the same way as reads — through the scope chain.
@@ -681,6 +697,32 @@ class _Resolver(ast.NodeVisitor):
             ref.ResolvedTo = defn
          else:
             ref.IsUnresolved = True
+
+   def _ResolveAttrCall(
+      self, ref: Reference, method_map: dict[tuple[str, str], Definition]
+   ) -> bool:
+      owner_qual = str(ref.Extra.get("owner_class_qualified_name", ""))
+      if owner_qual:
+         method_def = method_map.get((owner_qual, ref.Name))
+         if method_def is None:
+            return False
+         ref.ResolvedTo = method_def
+         ref.Extra["method_target"] = self._MethodTargetExtra(method_def)
+         return True
+
+      receiver = ref.Extra.pop("_receiver_name", None)
+      if not isinstance(receiver, str):
+         return False
+      class_def = ref.ScopeRef.ResolveName(receiver)
+      if class_def is None or class_def.Kind != DefKind.ClassDef:
+         return False
+      method_def = method_map.get((self._ClassQualifiedName(class_def), ref.Name))
+      if method_def is None:
+         return False
+      ref.ResolvedTo = method_def
+      ref.Extra = self._ClassMethodExtra(class_def, ref.Name)
+      ref.Extra["method_target"] = self._MethodTargetExtra(method_def)
+      return True
 
    def _DirectMethodMap(self) -> dict[tuple[str, str], Definition]:
       method_map: dict[tuple[str, str], Definition] = {}
