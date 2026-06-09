@@ -297,17 +297,24 @@ modes.
 
 
 
-2. Read-only method refs (Phase 2A same-class self/cls implemented)
+2. Read-only method refs (Phase 2A same-class self/cls implemented;
+   Phase 2B read-only class-owned calls implemented)
 
    - safe direct `self.Method()` and `cls.Method()` calls inside the owning
      class method resolve to `kind: "method"` targets with receiver, owner
      class, method name, and method target metadata
 
-   - arbitrary receivers, nested functions, lambdas, `super()`, missing
-     methods, and mismatched first parameters remain dynamic
+   - direct `ClassName.Method(instance)` references resolve when `ClassName` is
+     a known local class definition and `Method` is a direct method definition
+     on that class
 
-   - `ClassName.Method` and imported class method refs are intentionally not
-     implemented yet
+   - imported `ClassName.Method(instance)` references resolve only when the
+     class import resolves through existing safe project import resolution
+
+   - arbitrary receivers, nested functions, lambdas, `super()`, missing
+     methods, mismatched first parameters, unknown classes, inheritance/MRO,
+     monkey-patching, and dynamic string references remain dynamic or
+     unresolved rather than guessed
 
    - no rename planning or apply support
 

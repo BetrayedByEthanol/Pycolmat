@@ -196,6 +196,202 @@ class TestProjectRefs:
       assert data["dynamic_references"][0]["confidence"] == "dynamic"
       assert data["dynamic_references"][0]["extra"]["full"] == "obj.BuildValue"
 
+
+   def TestSameFileClassMethodRefResolves(self, tmp_path):
+      f = Write(
+         tmp_path / "main.py",
+         Src(
+            """
+            class Worker:
+               def Build(self):
+                  return 1
+
+            def Run(worker):
+               return Worker.Build(worker)
+            """
+         ),
+      )
+
+      result, _ = FindRefsByName([str(f)], "Build")
+      data = result.ToDict()
+      refs = [r for r in data["references"] if r["kind"] == "attribute_call"]
+
+      assert refs
+      assert refs[0]["confidence"] == "local_resolved"
+      assert refs[0]["resolved_to"]["kind"] == "method"
+      assert refs[0]["extra"]["receiver_kind"] == "class"
+      assert refs[0]["extra"]["owner_class_name"] == "Worker"
+      assert refs[0]["extra"]["owner_class_qualified_name"] == "Worker"
+      assert refs[0]["extra"]["method_name"] == "Build"
+      assert refs[0]["extra"]["method_target"]["name"] == "Build"
+
+   def TestImportedClassMethodRefResolves(self, tmp_path):
+      pkg = Package(tmp_path)
+      models = Write(
+         pkg / "models.py",
+         Src(
+            """
+            class Worker:
+               def Build(self):
+                  return 1
+            """
+         ),
+      )
+      Write(
+         pkg / "main.py",
+         Src(
+            """
+            from pkg.models import Worker
+
+            def Run(worker):
+               return Worker.Build(worker)
+            """
+         ),
+      )
+
+      result, _ = FindRefsByName([str(pkg)], "Build")
+      data = result.ToDict()
+      refs = [r for r in data["references"] if r["kind"] == "attribute_call"]
+
+      assert refs
+      assert refs[0]["confidence"] == "import_resolved"
+      assert refs[0]["resolved_to"]["file"] == str(models)
+      assert refs[0]["resolved_to"]["kind"] == "method"
+      assert refs[0]["extra"]["receiver_kind"] == "class"
+      assert refs[0]["extra"]["owner_class_name"] == "Worker"
+      assert refs[0]["extra"]["method_name"] == "Build"
+
+   def TestModuleAliasClassMethodRefResolves(self, tmp_path):
+      pkg = Package(tmp_path)
+      Write(
+         pkg / "models.py",
+         Src(
+            """
+            class Worker:
+               def Build(self):
+                  return 1
+            """
+         ),
+      )
+      Write(
+         pkg / "main.py",
+         Src(
+            """
+            import pkg.models as Models
+
+            def Run(worker):
+               return Models.Worker.Build(worker)
+            """
+         ),
+      )
+
+      result, _ = FindRefsByName([str(pkg)], "Build")
+      data = result.ToDict()
+      refs = [r for r in data["references"] if r["kind"] == "attribute_call"]
+
+      assert refs
+      assert refs[0]["confidence"] == "import_resolved"
+      assert refs[0]["resolved_to"]["kind"] == "method"
+      assert refs[0]["extra"]["receiver_kind"] == "class"
+      assert refs[0]["extra"]["owner_class_name"] == "Worker"
+
+   def TestRelativeImportedClassMethodRefResolves(self, tmp_path):
+      pkg = Package(tmp_path)
+      Write(
+         pkg / "models.py",
+         Src(
+            """
+            class Worker:
+               def Build(self):
+                  return 1
+            """
+         ),
+      )
+      Write(
+         pkg / "main.py",
+         Src(
+            """
+            from .models import Worker
+
+            def Run(worker):
+               return Worker.Build(worker)
+            """
+         ),
+      )
+
+      result, _ = FindRefsByName([str(pkg)], "Build")
+      data = result.ToDict()
+      refs = [r for r in data["references"] if r["kind"] == "attribute_call"]
+
+      assert refs
+      assert refs[0]["confidence"] == "import_resolved"
+      assert refs[0]["resolved_to"]["kind"] == "method"
+      assert refs[0]["extra"]["receiver_kind"] == "class"
+      assert refs[0]["extra"]["owner_class_name"] == "Worker"
+
+   def TestClassMissingMethodRemainsDynamic(self, tmp_path):
+      f = Write(
+         tmp_path / "main.py",
+         Src(
+            """
+            class Worker:
+               def Build(self):
+                  return 1
+
+            def Run(worker):
+               return Worker.MissingMethod(worker)
+            """
+         ),
+      )
+
+      result, _ = FindRefsByName([str(f)], "MissingMethod")
+      data = result.ToDict()
+
+      assert data["dynamic_references"]
+      assert data["dynamic_references"][0]["confidence"] == "dynamic"
+      assert data["dynamic_references"][0]["extra"]["full"] == "Worker.MissingMethod"
+
+   def TestUnknownClassMethodRemainsDynamic(self, tmp_path):
+      f = Write(
+         tmp_path / "main.py",
+         Src(
+            """
+            def Run(worker):
+               return UnknownClass.Build(worker)
+            """
+         ),
+      )
+
+      result, _ = FindRefsByName([str(f)], "Build")
+      data = result.ToDict()
+
+      assert data["dynamic_references"]
+      assert data["dynamic_references"][0]["confidence"] == "dynamic"
+      assert data["dynamic_references"][0]["extra"]["full"] == "UnknownClass.Build"
+
+   def TestObjMethodStillRemainsDynamic(self, tmp_path):
+      f = Write(
+         tmp_path / "main.py",
+         Src(
+            """
+            class Worker:
+               def Build(self):
+                  return 1
+
+            def Run(obj):
+               return obj.Build()
+            """
+         ),
+      )
+
+      result, _ = FindRefsByName([str(f)], "Build")
+      data = result.ToDict()
+      dynamic = [r for r in data["dynamic_references"] if r["kind"] == "attribute_call"]
+
+      assert dynamic
+      assert dynamic[0]["confidence"] == "dynamic"
+      assert dynamic[0]["extra"]["full"] == "obj.Build"
+
    def TestJsonOutputShape(self, tmp_path, capsys):
       f = Write(tmp_path / "main.py", "def Build():\n   return 1\n")
 

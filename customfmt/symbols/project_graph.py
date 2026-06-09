@@ -137,6 +137,15 @@ class _ImportTarget:
    Reason     : str               = ""
 
 
+@dataclass
+class _ClassMethodTarget:
+   Confidence : str
+   Method     : Definition
+   OwnerClass : Definition
+   Module     : str        = ""
+   Reason     : str        = ""
+
+
 class ProjectGraph:
    """Conservative project-level graph for read-only reference lookup."""
 
@@ -277,16 +286,47 @@ class ProjectGraph:
       extra = dict(ref.Extra)
 
       if ref.IsDynamic:
-         import_target = self._ResolveDynamicImportAttribute(ref)
-         if import_target is not None and import_target.Target is not None:
-            extra["import_target"] = self._ImportTargetDict(import_target)
-            confidence = CONF_IMPORT_RESOLVED
+         class_method_target = self._ResolveDynamicClassMethodAttribute(ref)
+         if class_method_target is not None:
+            confidence = class_method_target.Confidence
             target = self._ProjectDefinition(
-               import_target.Target,
-               confidence=CONF_IMPORT_RESOLVED,
+               class_method_target.Method,
+               confidence=confidence,
             )
+            extra = {
+               **extra,
+               "receiver_kind":              "class",
+               "owner_class_name":           class_method_target.OwnerClass.Name,
+               "owner_class_qualified_name": self._ClassQualifiedName(
+                  class_method_target.OwnerClass
+               ),
+               "method_name":                ref.Name,
+               "method_target":              self._MethodTargetDict(
+                  class_method_target.Method,
+                  confidence=confidence,
+               ),
+            }
+            if class_method_target.Module:
+               extra["import_target"] = {
+                  "confidence": class_method_target.Confidence,
+                  "module":     class_method_target.Module,
+                  "reason":     class_method_target.Reason,
+                  "definition": self._ProjectDefinition(
+                     class_method_target.OwnerClass,
+                     confidence=class_method_target.Confidence,
+                  ).ToDict(),
+               }
          else:
-            confidence = CONF_DYNAMIC
+            import_target = self._ResolveDynamicImportAttribute(ref)
+            if import_target is not None and import_target.Target is not None:
+               extra["import_target"] = self._ImportTargetDict(import_target)
+               confidence = CONF_IMPORT_RESOLVED
+               target = self._ProjectDefinition(
+                  import_target.Target,
+                  confidence=CONF_IMPORT_RESOLVED,
+               )
+            else:
+               confidence = CONF_DYNAMIC
       elif ref.ResolvedTo is not None:
          defn = ref.ResolvedTo
          if defn.Kind in (DefKind.Import, DefKind.ImportFrom):
@@ -373,6 +413,114 @@ class ProjectGraph:
    # Import resolution
    # -----------------------------------------------------------------------
 
+
+   def _ResolveDynamicClassMethodAttribute(
+      self, ref: Reference
+   ) -> _ClassMethodTarget | None:
+      full = ref.Extra.get("full")
+      if not isinstance(full, str) or "." not in full:
+         return None
+      owner_expr = full.rsplit(".", 1)[0]
+      class_target = self._ResolveClassExpression(ref, owner_expr)
+      if class_target is None:
+         return None
+      method = self._DirectMethodForClass(class_target.OwnerClass, ref.Name)
+      if method is None:
+         return None
+      return _ClassMethodTarget(
+         Confidence = class_target.Confidence,
+         Method     = method,
+         OwnerClass = class_target.OwnerClass,
+         Module     = class_target.Module,
+         Reason     = class_target.Reason,
+      )
+
+   def _ResolveClassExpression(
+      self, ref: Reference, owner_expr: str
+   ) -> _ClassMethodTarget | None:
+      parts = owner_expr.split(".")
+      if len(parts) == 1:
+         return self._ResolveSimpleClassName(ref, parts[0])
+      return self._ResolveImportedModuleClass(ref, parts)
+
+   def _ResolveSimpleClassName(
+      self, ref: Reference, name: str
+   ) -> _ClassMethodTarget | None:
+      defn = ref.ScopeRef.ResolveName(name)
+      if defn is None:
+         return None
+      if defn.Kind == DefKind.ClassDef:
+         return _ClassMethodTarget(
+            Confidence = CONF_LOCAL_RESOLVED,
+            Method     = defn,
+            OwnerClass = defn,
+            Reason     = "local_class_found",
+         )
+      if defn.Kind not in (DefKind.Import, DefKind.ImportFrom):
+         return None
+      import_target = self._ResolveImportDefinition(defn)
+      if import_target.Confidence != CONF_IMPORT_RESOLVED:
+         return None
+      if import_target.Target is None:
+         return None
+      if import_target.Target.Kind != DefKind.ClassDef:
+         return None
+      return _ClassMethodTarget(
+         Confidence = CONF_IMPORT_RESOLVED,
+         Method     = import_target.Target,
+         OwnerClass = import_target.Target,
+         Module     = import_target.Module,
+         Reason     = "imported_class_found",
+      )
+
+   def _ResolveImportedModuleClass(
+      self, ref: Reference, parts: list[str]
+   ) -> _ClassMethodTarget | None:
+      base_def = ref.ScopeRef.ResolveName(parts[0])
+      if base_def is None:
+         return None
+      if base_def.Kind not in (DefKind.Import, DefKind.ImportFrom):
+         return None
+      import_target = self._ResolveImportDefinition(base_def)
+      if import_target.Confidence != CONF_IMPORT_RESOLVED:
+         return None
+
+      class_name = parts[-1]
+      module_prefix = ".".join(parts[:-1])
+      imported_module = str(base_def.Extra.get("module", ""))
+      allowed_prefixes = {
+         base_def.Name,
+         imported_module,
+         import_target.Module,
+      }
+      if module_prefix not in allowed_prefixes:
+         return None
+      class_def = self._ModuleDefs.get((import_target.Module, class_name))
+      if class_def is None or class_def.Kind != DefKind.ClassDef:
+         return None
+      return _ClassMethodTarget(
+         Confidence = CONF_IMPORT_RESOLVED,
+         Method     = class_def,
+         OwnerClass = class_def,
+         Module     = import_target.Module,
+         Reason     = "module_class_found",
+      )
+
+   def _DirectMethodForClass(
+      self, class_def: Definition, method_name: str
+   ) -> Definition | None:
+      for defn in self._AllDefinitions():
+         if defn.Kind != DefKind.MethodDef or defn.Name != method_name:
+            continue
+         owner_file = str(defn.Extra.get("owner_class_file", ""))
+         if not _SamePath(owner_file, class_def.ScopeRef.FilePath):
+            continue
+         if defn.Extra.get("owner_class_line") != class_def.Line:
+            continue
+         if defn.Extra.get("owner_class_col") != class_def.Col:
+            continue
+         return defn
+      return None
 
    def _ResolveDynamicImportAttribute(self, ref: Reference) -> _ImportTarget | None:
       full = ref.Extra.get("full")
@@ -566,6 +714,29 @@ class ProjectGraph:
          ),
       }
 
+   def _ClassQualifiedName(self, class_def: Definition) -> str:
+      for scope in self._AllScopes():
+         if not _SamePath(scope.FilePath, class_def.ScopeRef.FilePath):
+            continue
+         if scope.Kind.value != "class":
+            continue
+         if scope.Line == class_def.Line and scope.Col == class_def.Col:
+            return scope.QualName
+      return class_def.Name
+
+   def _MethodTargetDict(self, defn: Definition, *, confidence: str) -> dict:
+      project_def = self._ProjectDefinition(defn, confidence=confidence).ToDict()
+      return {
+         "name":           defn.Name,
+         "kind":           defn.Kind.value,
+         "file":           defn.ScopeRef.FilePath,
+         "line":           defn.Line,
+         "col":            defn.Col,
+         "scope_id":       defn.ScopeRef.ScopeId,
+         "qualified_name": project_def["qualified_name"],
+         "definition":     project_def,
+      }
+
    # -----------------------------------------------------------------------
    # Iteration and identity helpers
    # -----------------------------------------------------------------------
@@ -575,6 +746,9 @@ class ProjectGraph:
 
    def _AllReferences(self) -> list[Reference]:
       return [r for result in self.Results for r in result.References]
+
+   def _AllScopes(self) -> list:
+      return [s for result in self.Results for s in result.Tree.AllScopes]
 
    def _FindDefinitionAt(
       self, file_path: str, line: int, col: int
