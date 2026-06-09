@@ -670,6 +670,7 @@ class _Resolver(ast.NodeVisitor):
             method_def = method_map.get(method_key)
             if method_def is not None:
                ref.ResolvedTo = method_def
+               ref.Extra["method_target"] = self._MethodTargetExtra(method_def)
             else:
                ref.IsDynamic = True
             continue
@@ -688,6 +689,15 @@ class _Resolver(ast.NodeVisitor):
             continue
          method_map.setdefault((defn.ScopeRef.QualName, defn.Name), defn)
       return method_map
+
+   def _MethodTargetExtra(self, defn: Definition) -> dict:
+      return {
+         "name":     defn.Name,
+         "kind":     defn.Kind.value,
+         "line":     defn.Line,
+         "col":      defn.Col,
+         "scope_id": defn.ScopeRef.ScopeId,
+      }
 
    # -----------------------------------------------------------------------
    # Build
