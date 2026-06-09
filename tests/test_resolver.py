@@ -1002,6 +1002,9 @@ class TestSameClassMethodReferences:
       assert ref.Extra["owner_class_name"] == "Repo"
       assert ref.Extra["owner_class_qualified_name"] == "Repo"
       assert ref.Extra["method_name"] == "Helper"
+      assert ref.Extra["method_target"]["name"] == "Helper"
+      assert ref.Extra["method_target"]["kind"] == DefKind.MethodDef.value
+      assert ref.Extra["method_target"]["line"] == 5
 
    def TestClsMethodInsideSameClassResolvesToMethodDef(self, tmp_path):
       src = Src("""\
@@ -1023,6 +1026,9 @@ class TestSameClassMethodReferences:
       assert ref.Extra["owner_class_name"] == "Repo"
       assert ref.Extra["owner_class_qualified_name"] == "Repo"
       assert ref.Extra["method_name"] == "Helper"
+      assert ref.Extra["method_target"]["name"] == "Helper"
+      assert ref.Extra["method_target"]["kind"] == DefKind.MethodDef.value
+      assert ref.Extra["method_target"]["line"] == 5
 
    def TestObjMethodRemainsDynamic(self, tmp_path):
       src = Src("""\
@@ -1047,6 +1053,22 @@ class TestSameClassMethodReferences:
                return self.Helper()
 
             def Helper(self):
+               return 1
+      """)
+      f = Write(tmp_path / "f.py", src)
+      result = ResolveFile(f)
+      ref = self.AttrRef(result, "Helper")
+
+      assert ref.IsDynamic
+      assert ref.ResolvedTo is None
+
+   def TestClsMethodWithDifferentFirstParameterRemainsDynamic(self, tmp_path):
+      src = Src("""\
+         class Repo:
+            def Build(klass):
+               return cls.Helper()
+
+            def Helper(cls):
                return 1
       """)
       f = Write(tmp_path / "f.py", src)
@@ -1106,6 +1128,27 @@ class TestSameClassMethodReferences:
 
       assert ref.IsDynamic
       assert ref.ResolvedTo is None
+
+   def TestSelfMissingMethodRemainsDynamic(self, tmp_path):
+      src = Src("""\
+         class Repo:
+            def Build(self):
+               return self.MissingMethod()
+
+            def Helper(self):
+               return 1
+      """)
+      f = Write(tmp_path / "f.py", src)
+      result = ResolveFile(f)
+      ref = self.AttrRef(result, "MissingMethod")
+
+      assert ref.IsDynamic
+      assert ref.ResolvedTo is None
+      assert ref.Extra["receiver_kind"] == "self"
+      assert ref.Extra["owner_class_name"] == "Repo"
+      assert ref.Extra["owner_class_qualified_name"] == "Repo"
+      assert ref.Extra["method_name"] == "MissingMethod"
+      assert "method_target" not in ref.Extra
 
 
 # ---------------------------------------------------------------------------

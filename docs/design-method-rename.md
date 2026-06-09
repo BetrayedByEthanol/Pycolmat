@@ -297,13 +297,19 @@ modes.
 
 
 
-2. Read-only method refs
+2. Read-only method refs (Phase 2A same-class self/cls implemented)
 
-   - report safe self/cls/ClassName.Method refs
+   - safe direct `self.Method()` and `cls.Method()` calls inside the owning
+     class method resolve to `kind: "method"` targets with receiver, owner
+     class, method name, and method target metadata
 
-   - keep unsupported refs dynamic/unresolved
+   - arbitrary receivers, nested functions, lambdas, `super()`, missing
+     methods, and mismatched first parameters remain dynamic
 
-   - no apply support
+   - `ClassName.Method` and imported class method refs are intentionally not
+     implemented yet
+
+   - no rename planning or apply support
 
 
 
