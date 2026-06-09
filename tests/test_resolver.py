@@ -1043,6 +1043,90 @@ class TestSameClassMethodReferences:
       assert ref.Extra["method_target"]["kind"] == "method"
       assert ref.Extra["method_target"]["line"] == 5
 
+   def TestSameFileClassMethodWithInstanceArgResolvesToMethodDef(self, tmp_path):
+      src = Src("""\
+         class Repo:
+            def Build(self):
+               return 1
+
+         def Run(repo):
+            return Repo.Build(repo)
+      """)
+      f = Write(tmp_path / "f.py", src)
+      result = ResolveFile(f)
+      ref = self.AttrRef(result, "Build")
+
+      assert ref.Kind == RefKind.AttrCall
+      assert ref.IsDynamic is False
+      assert ref.ResolvedTo is not None
+      assert ref.ResolvedTo.Kind == DefKind.MethodDef
+      assert ref.Extra["receiver_kind"] == "class"
+      assert ref.Extra["owner_class_name"] == "Repo"
+      assert ref.Extra["owner_class_qualified_name"] == "Repo"
+      assert ref.Extra["method_name"] == "Build"
+      assert ref.Extra["method_target"]["name"] == "Build"
+      assert ref.Extra["method_target"]["kind"] == "method"
+      assert ref.Extra["method_target"]["line"] == 2
+
+   def TestSameFileClassMethodWithoutArgsResolvesToMethodDef(self, tmp_path):
+      src = Src("""\
+         class Repo:
+            def Build(self):
+               return 1
+
+         def Run():
+            return Repo.Build()
+      """)
+      f = Write(tmp_path / "f.py", src)
+      result = ResolveFile(f)
+      ref = self.AttrRef(result, "Build")
+
+      assert ref.Kind == RefKind.AttrCall
+      assert ref.IsDynamic is False
+      assert ref.ResolvedTo is not None
+      assert ref.ResolvedTo.Kind == DefKind.MethodDef
+      assert ref.Extra["receiver_kind"] == "class"
+      assert ref.Extra["owner_class_name"] == "Repo"
+      assert ref.Extra["owner_class_qualified_name"] == "Repo"
+      assert ref.Extra["method_name"] == "Build"
+      assert ref.Extra["method_target"]["name"] == "Build"
+      assert ref.Extra["method_target"]["kind"] == "method"
+      assert ref.Extra["method_target"]["line"] == 2
+
+   def TestUnknownClassMethodRemainsDynamic(self, tmp_path):
+      src = Src("""\
+         class Repo:
+            def Build(self):
+               return 1
+
+         def Run():
+            return UnknownClass.Build()
+      """)
+      f = Write(tmp_path / "f.py", src)
+      result = ResolveFile(f)
+      ref = self.AttrRef(result, "Build")
+
+      assert ref.Kind == RefKind.AttrCall
+      assert ref.IsDynamic is True
+      assert ref.ResolvedTo is None
+
+   def TestSameFileClassMissingMethodRemainsDynamic(self, tmp_path):
+      src = Src("""\
+         class Repo:
+            def Build(self):
+               return 1
+
+         def Run():
+            return Repo.MissingMethod()
+      """)
+      f = Write(tmp_path / "f.py", src)
+      result = ResolveFile(f)
+      ref = self.AttrRef(result, "MissingMethod")
+
+      assert ref.Kind == RefKind.AttrCall
+      assert ref.IsDynamic is True
+      assert ref.ResolvedTo is None
+
    def TestObjMethodRemainsDynamic(self, tmp_path):
       src = Src("""\
          class Repo:
