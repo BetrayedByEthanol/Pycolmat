@@ -295,6 +295,41 @@ class TestProjectRefs:
       assert refs[0]["extra"]["receiver_kind"] == "class"
       assert refs[0]["extra"]["owner_class_name"] == "Worker"
 
+   def TestNamespaceImportedClassMethodRefResolves(self, tmp_path):
+      ns = tmp_path / "ns"
+      models = Write(
+         ns / "models.py",
+         Src(
+            """
+            class Worker:
+               def Build(self):
+                  return 1
+            """
+         ),
+      )
+      Write(
+         ns / "main.py",
+         Src(
+            """
+            from ns.models import Worker
+
+            def Run(worker):
+               return Worker.Build(worker)
+            """
+         ),
+      )
+
+      result, _ = FindRefsByName([str(tmp_path)], "Build")
+      data = result.ToDict()
+      refs = [r for r in data["references"] if r["kind"] == "attribute_call"]
+
+      assert refs
+      assert refs[0]["confidence"] == "import_resolved"
+      assert refs[0]["resolved_to"]["file"] == str(models)
+      assert refs[0]["resolved_to"]["kind"] == "method"
+      assert refs[0]["extra"]["receiver_kind"] == "class"
+      assert refs[0]["extra"]["owner_class_name"] == "Worker"
+
    def TestRelativeImportedClassMethodRefResolves(self, tmp_path):
       pkg = Package(tmp_path)
       Write(
@@ -417,6 +452,39 @@ class TestProjectRefs:
       assert data["dynamic_references"]
       assert data["dynamic_references"][0]["confidence"] == "dynamic"
       assert data["dynamic_references"][0]["extra"]["full"] == "Worker.MissingMethod"
+
+   def TestModuleAliasMissingClassMethodRemainsDynamic(self, tmp_path):
+      pkg = Package(tmp_path)
+      Write(
+         pkg / "models.py",
+         Src(
+            """
+            class Worker:
+               def Build(self):
+                  return 1
+            """
+         ),
+      )
+      Write(
+         pkg / "main.py",
+         Src(
+            """
+            import pkg.models as Models
+
+            def Run(worker):
+               return Models.Worker.MissingMethod(worker)
+            """
+         ),
+      )
+
+      result, _ = FindRefsByName([str(pkg)], "MissingMethod")
+      data = result.ToDict()
+      dynamic = [r for r in data["dynamic_references"] if r["kind"] == "attribute_call"]
+
+      assert dynamic
+      assert dynamic[0]["confidence"] == "dynamic"
+      assert dynamic[0]["resolved_to"] is None
+      assert dynamic[0]["extra"]["full"] == "Models.Worker.MissingMethod"
 
    def TestUnknownClassMethodRemainsDynamic(self, tmp_path):
       f = Write(
