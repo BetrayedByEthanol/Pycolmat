@@ -329,6 +329,73 @@ class TestProjectRefs:
       assert refs[0]["extra"]["receiver_kind"] == "class"
       assert refs[0]["extra"]["owner_class_name"] == "Worker"
 
+
+   def TestAmbiguousImportedClassMethodRemainsDynamic(self, tmp_path):
+      first = tmp_path / "first"
+      second = tmp_path / "second"
+      Write(
+         first / "ns" / "models.py",
+         Src(
+            """
+            class Worker:
+               def Build(self):
+                  return 1
+            """
+         ),
+      )
+      Write(
+         second / "ns" / "models.py",
+         Src(
+            """
+            class Worker:
+               def Build(self):
+                  return 2
+            """
+         ),
+      )
+      Write(
+         first / "ns" / "main.py",
+         Src(
+            """
+            from ns.models import Worker
+
+            def Run(worker):
+               return Worker.Build(worker)
+            """
+         ),
+      )
+
+      result, _ = FindRefsByName([str(first), str(second)], "Build")
+      data = result.ToDict()
+      dynamic = [r for r in data["dynamic_references"] if r["kind"] == "attribute_call"]
+
+      assert dynamic
+      assert dynamic[0]["confidence"] == "dynamic"
+      assert dynamic[0]["resolved_to"] is None
+      assert dynamic[0]["extra"]["full"] == "Worker.Build"
+
+   def TestExternalImportedClassMethodRemainsDynamic(self, tmp_path):
+      f = Write(
+         tmp_path / "main.py",
+         Src(
+            """
+            from external.pkg import Worker
+
+            def Run(worker):
+               return Worker.Build(worker)
+            """
+         ),
+      )
+
+      result, _ = FindRefsByName([str(f)], "Build")
+      data = result.ToDict()
+      dynamic = [r for r in data["dynamic_references"] if r["kind"] == "attribute_call"]
+
+      assert dynamic
+      assert dynamic[0]["confidence"] == "dynamic"
+      assert dynamic[0]["resolved_to"] is None
+      assert dynamic[0]["extra"]["full"] == "Worker.Build"
+
    def TestClassMissingMethodRemainsDynamic(self, tmp_path):
       f = Write(
          tmp_path / "main.py",

@@ -291,6 +291,38 @@ class TestRenameSymbolPlan:
       assert "unsupported" in err.getvalue() or "not supported" in err.getvalue()
       assert f.read_text(encoding="utf-8") == original
 
+
+   def TestImportedMethodRenameByNameRejected(self, tmp_path):
+      pkg = tmp_path / "pkg"
+      Write(pkg / "__init__.py", "")
+      Write(
+         pkg / "models.py",
+         Src(
+            """
+            class Repo:
+               def Build(self):
+                  return 1
+            """
+         ),
+      )
+      Write(
+         pkg / "main.py",
+         Src(
+            """
+            from pkg.models import Repo
+
+            def Run(repo):
+               return Repo.Build(repo)
+            """
+         ),
+      )
+
+      rc, data, err = RunPlan(pkg, "--name", "Build", "--to", "Make")
+
+      assert rc == 2
+      assert data == {}
+      assert "supported project symbol" in err or "unsupported" in err
+
    def TestClassAttributeRenameRejected(self, tmp_path):
       f = Write(
          tmp_path / "main.py",
