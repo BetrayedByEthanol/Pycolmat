@@ -329,13 +329,21 @@ modes.
 
 
 
-3. Rename-symbol plan/diff
+3. Rename-symbol plan/diff (Phase 3A implemented)
 
-   - emit guarded token edits for supported method refs
+   - `rename-symbol` accepts method targets by `--symbol` and by unambiguous
+     `--name`
 
-   - diff only first
+   - JSON plans emit guarded token edits for the method definition and safe
+     Phase 2 method references
 
-   - no apply support until tests are strong
+   - `--diff` renders those guarded method token edits without writing files
+
+   - incomplete method plans remain blocked when dynamic, unresolved, skipped,
+     or warning-bearing references are present
+
+   - `--apply` for method targets is intentionally rejected until apply support
+     is implemented
 
 
 

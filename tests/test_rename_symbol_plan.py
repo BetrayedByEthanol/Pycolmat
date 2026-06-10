@@ -35,8 +35,9 @@ def Package(tmp_path: Path) -> Path:
 def RunPlan(paths, *args: str) -> tuple[int, dict, str]:
    out = StringIO()
    err = StringIO()
+   path_args = paths if isinstance(paths, list) else [str(paths)]
    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-      rc = Main(["rename-symbol", str(paths), *args])
+      rc = Main(["rename-symbol", *path_args, *args])
    data = json.loads(out.getvalue()) if out.getvalue().strip() else {}
    return rc, data, err.getvalue()
 
@@ -199,7 +200,7 @@ class TestRenameSymbolPlan:
       assert data["dynamic_references"]
       assert data["dynamic_references"][0]["confidence"] == "dynamic"
 
-   def TestMethodRenameRejected(self, tmp_path):
+   def TestMethodRenamePlanIncludesDefinition(self, tmp_path):
       f = Write(
          tmp_path / "main.py",
          Src(
@@ -213,11 +214,12 @@ class TestRenameSymbolPlan:
 
       rc, data, err = RunPlan(f, "--name", "BuildValue", "--to", "MakeValue")
 
-      assert rc == 2
-      assert data == {}
-      assert "supported project symbol" in err
+      assert rc == 0
+      assert err == ""
+      assert data["target"]["kind"] == "method"
+      assert [e["kind"] for e in data["edits"]] == ["definition:method"]
 
-   def TestMethodRenameWithSameClassSelfReferenceRejected(self, tmp_path):
+   def TestMethodRenameWithSameClassSelfReferencePlansDefinitionAndSelfRef(self, tmp_path):
       f = Write(
          tmp_path / "main.py",
          Src(
@@ -233,12 +235,15 @@ class TestRenameSymbolPlan:
       )
 
       rc, data, err = RunPlan(f, "--name", "Helper", "--to", "MakeValue")
+      edits = {(e["line"], e["col"], e["old"], e["kind"]) for e in data["edits"]}
 
-      assert rc == 2
-      assert data == {}
-      assert "supported project symbol" in err
+      assert rc == 0
+      assert err == ""
+      assert data["target"]["kind"] == "method"
+      assert (4, 18, "Helper", "reference:attribute_call") in edits
+      assert (6, 7, "Helper", "definition:method") in edits
 
-   def TestMethodRenameWithClassMethodReferenceRejected(self, tmp_path):
+   def TestMethodRenameWithClassMethodReferencePlansDefinitionAndClassRef(self, tmp_path):
       f = Write(
          tmp_path / "main.py",
          Src(
@@ -254,12 +259,41 @@ class TestRenameSymbolPlan:
       )
 
       rc, data, err = RunPlan(f, "--name", "BuildValue", "--to", "MakeValue")
+      edits = {(e["line"], e["col"], e["old"], e["kind"]) for e in data["edits"]}
 
-      assert rc == 2
-      assert data == {}
-      assert "supported project symbol" in err
+      assert rc == 0
+      assert err == ""
+      assert data["target"]["kind"] == "method"
+      assert (3, 7, "BuildValue", "definition:method") in edits
+      assert (7, 20, "BuildValue", "reference:attribute_call") in edits
 
-   def TestMethodRenameBySymbolRejected(self, tmp_path):
+   def TestMethodRenameWithClsReferencePlansDefinitionAndClsRef(self, tmp_path):
+      f = Write(
+         tmp_path / "main.py",
+         Src(
+            """
+            class UserModel:
+               @classmethod
+               def BuildValue(cls):
+                  return cls.Helper()
+
+               @classmethod
+               def Helper(cls):
+                  return 1
+            """
+         ),
+      )
+
+      rc, data, err = RunPlan(f, "--name", "Helper", "--to", "MakeValue")
+      edits = {(e["line"], e["col"], e["old"], e["kind"]) for e in data["edits"]}
+
+      assert rc == 0
+      assert err == ""
+      assert data["target"]["kind"] == "method"
+      assert (5, 17, "Helper", "reference:attribute_call") in edits
+      assert (8, 7, "Helper", "definition:method") in edits
+
+   def TestMethodRenameBySymbolPlansDefinition(self, tmp_path):
       f = Write(
          tmp_path / "main.py",
          Src(
@@ -273,11 +307,13 @@ class TestRenameSymbolPlan:
 
       rc, data, err = RunPlan(f, "--symbol", f"{f}:3:3", "--to", "MakeValue")
 
-      assert rc == 2
-      assert data == {}
-      assert "unsupported" in err
+      assert rc == 0
+      assert err == ""
+      assert data["target"]["kind"] == "method"
+      assert data["target"]["name"] == "BuildValue"
+      assert data["edits"][0]["kind"] == "definition:method"
 
-   def TestMethodMetadataDoesNotEnableMethodRenameBySymbol(self, tmp_path):
+   def TestMethodMetadataEnablesMethodRenameBySymbol(self, tmp_path):
       original = "class Repo:\n   def GetByID(self):\n      pass\n"
       f = Write(tmp_path / "main.py", original)
       out = StringIO()
@@ -286,13 +322,13 @@ class TestRenameSymbolPlan:
       with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
          rc = Main(["rename-symbol", str(f), "--symbol", f"{f}:2:3", "--to", "FindByID"])
 
-      assert rc == 2
-      assert out.getvalue() == ""
-      assert "unsupported" in err.getvalue() or "not supported" in err.getvalue()
+      assert rc == 0
+      assert err.getvalue() == ""
+      assert '"kind": "method"' in out.getvalue()
       assert f.read_text(encoding="utf-8") == original
 
 
-   def TestImportedMethodRenameByNameRejected(self, tmp_path):
+   def TestImportedMethodRenameByNamePlansDefinitionAndImportedClassRef(self, tmp_path):
       pkg = tmp_path / "pkg"
       Write(pkg / "__init__.py", "")
       Write(
@@ -318,10 +354,87 @@ class TestRenameSymbolPlan:
       )
 
       rc, data, err = RunPlan(pkg, "--name", "Build", "--to", "Make")
+      edits = {
+         (Path(e["file"]).name, e["line"], e["col"], e["old"], e["kind"])
+         for e in data["edits"]
+      }
+
+      assert rc == 0
+      assert err == ""
+      assert data["target"]["kind"] == "method"
+      assert ("models.py", 3, 7, "Build", "definition:method") in edits
+      assert ("main.py", 5, 15, "Build", "reference:attribute_call") in edits
+
+   def TestMethodRenameWithDynamicObjReferenceIsRejected(self, tmp_path):
+      f = Write(
+         tmp_path / "main.py",
+         Src(
+            """
+            class Repo:
+               def Build(self):
+                  return 1
+
+            def Run(obj):
+               return obj.Build()
+            """
+         ),
+      )
+
+      rc, data, err = RunPlan(f, "--name", "Build", "--to", "Make")
 
       assert rc == 2
       assert data == {}
-      assert "supported project symbol" in err or "unsupported" in err
+      assert "method rename plan is incomplete" in err
+      assert "dynamic reference" in err
+
+   def TestMethodRenameWithAmbiguousImportedClassReferenceIsRejected(self, tmp_path):
+      first = tmp_path / "first"
+      second = tmp_path / "second"
+      Write(first / "ns" / "models.py", "class Repo:\n   def Build(self):\n      return 1\n")
+      Write(second / "ns" / "models.py", "class Repo:\n   def Build(self):\n      return 2\n")
+      Write(
+         first / "ns" / "main.py",
+         Src(
+            """
+            from ns.models import Repo
+
+            def Run(repo):
+               return Repo.Build(repo)
+            """
+         ),
+      )
+      symbol = f"{first / 'ns' / 'models.py'}:2:3"
+
+      rc, data, err = RunPlan([str(first), str(second)], "--symbol", symbol, "--to", "Make")
+
+      assert rc == 2
+      assert data == {}
+      assert "method rename plan is incomplete" in err
+      assert "dynamic reference" in err
+
+   def TestMethodRenameWithExternalImportedClassReferenceIsRejected(self, tmp_path):
+      f = Write(
+         tmp_path / "main.py",
+         Src(
+            """
+            class Repo:
+               def Build(self):
+                  return 1
+
+            from external.models import Repo as ExternalRepo
+
+            def Run(repo):
+               return ExternalRepo.Build(repo)
+            """
+         ),
+      )
+
+      rc, data, err = RunPlan(f, "--name", "Build", "--to", "Make")
+
+      assert rc == 2
+      assert data == {}
+      assert "method rename plan is incomplete" in err
+      assert "dynamic reference" in err
 
    def TestClassAttributeRenameRejected(self, tmp_path):
       f = Write(
@@ -547,6 +660,29 @@ class TestRenameSymbolDiff:
       assert "+class AccountModel:" in out
       assert "-   return UserModel()" in out
       assert "+   return AccountModel()" in out
+      assert f.read_text(encoding="utf-8") == original
+
+   def TestMethodDiffRenamesDefinitionAndSelfReference(self, tmp_path):
+      original = Src(
+         """
+         class Repo:
+            def Run(self):
+               return self.Build()
+
+            def Build(self):
+               return 1
+         """
+      )
+      f = Write(tmp_path / "main.py", original)
+
+      rc, out, err = self.RunDiff(f, "--name", "Build", "--to", "Make")
+
+      assert rc == 0
+      assert err == ""
+      assert "-      return self.Build()" in out
+      assert "+      return self.Make()" in out
+      assert "-   def Build(self):" in out
+      assert "+   def Make(self):" in out
       assert f.read_text(encoding="utf-8") == original
 
    def TestDiffIncludesNamespaceAbsoluteImportBindingAndCallSite(self, tmp_path):
@@ -828,6 +964,20 @@ class TestRenameSymbolApply:
          rc = Main(["rename-symbol", *path_args, *args, "--apply"])
       return rc, out.getvalue(), err.getvalue()
 
+
+   def TestApplyRejectsMethodRenameAndWritesNothing(self, tmp_path):
+      f = Write(
+         tmp_path / "main.py",
+         "class Repo:\n   def Build(self):\n      return self.Build()\n",
+      )
+      original = f.read_text(encoding="utf-8")
+
+      rc, out, err = self.RunApply(f, "--name", "Build", "--to", "Make")
+
+      assert rc == 2
+      assert out == ""
+      assert "method apply not supported yet" in err
+      assert f.read_text(encoding="utf-8") == original
 
    def TestApplyUpdatesSafeNamespacePackageCase(self, tmp_path):
       ns = tmp_path / "ns"
