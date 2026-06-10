@@ -22,6 +22,7 @@ from customfmt.symbols.scopes import DefKind
 SUPPORTED_TARGET_KINDS = {
    DefKind.ClassDef.value,
    DefKind.FunctionDef.value,
+   DefKind.MethodDef.value,
    DefKind.ModuleDecl.value,
 }
 SUPPORTED_IMPORT_KINDS = {
@@ -144,6 +145,8 @@ def PlanRenameSymbol(
    _DetectDefinitionCollisions(plan, graph.Results, target, new_name)
    _DetectEditConflicts(plan)
    plan.Edits.sort(key=lambda e: (e.FilePath, e.Line, e.Col, e.Kind))
+   if _IsMethodTarget(target) and _PlanHasIncompleteSignals(plan):
+      raise ValueError(_FormatIncompleteMethodPlanError(plan))
    return plan, discovery_errors
 
 
@@ -203,6 +206,10 @@ def _ValidateTarget(target: ProjectDefinition) -> None:
    raise ValueError(f"unsupported symbol kind for project rename: {target.Kind}")
 
 
+def _IsMethodTarget(target: ProjectDefinition | None) -> bool:
+   return target is not None and target.Kind == DefKind.MethodDef.value
+
+
 def _IsSupportedImportAlias(defn: ProjectDefinition) -> bool:
    if defn.Kind not in SUPPORTED_IMPORT_KINDS:
       return False
@@ -219,6 +226,9 @@ def _ValidateNewName(target: ProjectDefinition, new_name: str) -> None:
    elif target.Kind == DefKind.FunctionDef.value:
       if not _IsPascalCase(new_name):
          raise ValueError("NewName must be PascalCase for function targets")
+   elif target.Kind == DefKind.MethodDef.value:
+      if not _IsPascalCase(new_name):
+         raise ValueError("NewName must be PascalCase for method targets")
    elif target.Kind == DefKind.ModuleDecl.value:
       if not (_IsPascalCase(new_name) or new_name.isupper()):
          raise ValueError(
@@ -342,6 +352,29 @@ def _DetectDefinitionCollisions(
                "col":    defn.Col,
                "name":   new_name,
             })
+
+
+def _PlanHasIncompleteSignals(plan: RenameSymbolPlan) -> bool:
+   return bool(
+      plan.Warnings
+      or plan.Skipped
+      or plan.UnresolvedReferences
+      or plan.DynamicReferences
+   )
+
+
+def _FormatIncompleteMethodPlanError(plan: RenameSymbolPlan) -> str:
+   parts: list[str] = []
+   if plan.Warnings:
+      parts.append(f"{len(plan.Warnings)} warning(s)")
+   if plan.Skipped:
+      parts.append(f"{len(plan.Skipped)} skipped item(s)")
+   if plan.UnresolvedReferences:
+      parts.append(f"{len(plan.UnresolvedReferences)} unresolved reference(s)")
+   if plan.DynamicReferences:
+      parts.append(f"{len(plan.DynamicReferences)} dynamic reference(s)")
+   summary = ", ".join(parts)
+   return f"method rename plan is incomplete ({summary})"
 
 
 def _DetectEditConflicts(plan: RenameSymbolPlan) -> None:

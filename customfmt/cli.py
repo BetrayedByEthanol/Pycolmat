@@ -667,6 +667,9 @@ def _CmdRenameSymbol(args: argparse.Namespace) -> int:
       return 0
 
    if args.apply:
+      if _PlanTargetsMethod(plan):
+         print("customfmt: error: method apply not supported yet", file=sys.stderr)
+         return 2
       if not args.allow_incomplete and _PlanHasIncompleteApplySignals(plan):
          print(_FormatIncompleteApplyError(plan), file=sys.stderr)
          return 2
@@ -698,6 +701,11 @@ def _CmdRenameSymbol(args: argparse.Namespace) -> int:
       print(serialised)
 
    return 0
+
+
+def _PlanTargetsMethod(plan) -> bool:
+   target = getattr(plan, "Target", None)
+   return target is not None and getattr(target, "Kind", None) == "method"
 
 
 def _PlanHasIncompleteApplySignals(plan) -> bool:
