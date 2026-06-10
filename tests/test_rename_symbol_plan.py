@@ -313,6 +313,52 @@ class TestRenameSymbolPlan:
       assert data["target"]["name"] == "BuildValue"
       assert data["edits"][0]["kind"] == "definition:method"
 
+   def TestMethodRenameByNameWithDuplicateMethodNamesIsAmbiguous(self, tmp_path):
+      f = Write(
+         tmp_path / "main.py",
+         Src(
+            '''
+            class Repo:
+               def Build(self):
+                  return 1
+
+            class OtherRepo:
+               def Build(self):
+                  return 2
+            '''
+         ),
+      )
+
+      rc, data, err = RunPlan(f, "--name", "Build", "--to", "Make")
+
+      assert rc == 2
+      assert data == {}
+      assert "--name is ambiguous" in err
+      assert "use --symbol" in err
+
+   def TestMethodRenameBySymbolWithDuplicateMethodNamesSelectsOneMethod(self, tmp_path):
+      f = Write(
+         tmp_path / "main.py",
+         Src(
+            '''
+            class Repo:
+               def Build(self):
+                  return 1
+
+            class OtherRepo:
+               def Build(self):
+                  return 2
+            '''
+         ),
+      )
+
+      rc, data, err = RunPlan(f, "--symbol", f"{f}:3:3", "--to", "Make")
+
+      assert rc == 0
+      assert err == ""
+      assert data["target"]["qualified_name"] == "Repo.Build"
+      assert [e["line"] for e in data["edits"]] == [3]
+
    def TestMethodMetadataEnablesMethodRenameBySymbol(self, tmp_path):
       original = "class Repo:\n   def GetByID(self):\n      pass\n"
       f = Write(tmp_path / "main.py", original)
@@ -386,6 +432,76 @@ class TestRenameSymbolPlan:
       assert data == {}
       assert "method rename plan is incomplete" in err
       assert "dynamic reference" in err
+
+   def TestMethodRenameCollisionWithSameClassMethodIsRejected(self, tmp_path):
+      f = Write(
+         tmp_path / "main.py",
+         Src(
+            '''
+            class Repo:
+               def ExistingMethod(self):
+                  return 1
+
+               def Helper(self):
+                  return 2
+            '''
+         ),
+      )
+
+      rc, data, err = RunPlan(f, "--name", "Helper", "--to", "ExistingMethod")
+
+      assert rc == 2
+      assert data == {}
+      assert "method rename plan is incomplete" in err
+      assert "warning" in err
+
+   def TestMethodRenameInheritedMethodReferenceStaysDynamicAndRejected(self, tmp_path):
+      f = Write(
+         tmp_path / "main.py",
+         Src(
+            '''
+            class Base:
+               def Build(self):
+                  return 1
+
+            class Child(Base):
+               pass
+
+            def Run():
+               return Child.Build()
+            '''
+         ),
+      )
+
+      rc, data, err = RunPlan(f, "--name", "Build", "--to", "Make")
+
+      assert rc == 2
+      assert data == {}
+      assert "method rename plan is incomplete" in err
+      assert "dynamic reference" in err
+
+   def TestMethodRenameGetattrStringReferenceIsDynamicAndRejected(self, tmp_path):
+      f = Write(
+         tmp_path / "main.py",
+         Src(
+            '''
+            class Repo:
+               def Build(self):
+                  return 1
+
+            def Run(obj):
+               return getattr(obj, "Build")()
+            '''
+         ),
+      )
+
+      rc, data, err = RunPlan(f, "--name", "Build", "--to", "Make")
+
+      assert rc == 2
+      assert data == {}
+      assert "method rename plan is incomplete" in err
+      assert "dynamic reference" in err
+      assert f.read_text(encoding="utf-8").count("Build") == 2
 
    def TestMethodRenameWithAmbiguousImportedClassReferenceIsRejected(self, tmp_path):
       first = tmp_path / "first"
@@ -751,6 +867,15 @@ class TestRenameSymbolDiff:
       assert out == ""
       assert "--diff cannot be combined with --output" in err
       assert not out_path.exists()
+
+   def TestDiffRejectsAllowIncompleteForMethodPlan(self, tmp_path):
+      f = Write(tmp_path / "main.py", "class Repo:\n   def Build(self):\n      return 1\n")
+
+      rc, out, err = self.RunDiff(f, "--name", "Build", "--to", "Make", "--allow-incomplete")
+
+      assert rc == 2
+      assert out == ""
+      assert "--allow-incomplete requires --apply" in err
 
    def TestDiffPrettySucceedsWithNormalDiff(self, tmp_path):
       f = Write(tmp_path / "main.py", "class UserModel:\n   pass\n")
@@ -1632,6 +1757,15 @@ class TestRenameSymbolApply:
       rc, data, err = RunPlan(
          f, "--name", "UserModel", "--to", "AccountModel", "--allow-incomplete"
       )
+
+      assert rc == 2
+      assert data == {}
+      assert "--allow-incomplete requires --apply" in err
+
+   def TestAllowIncompleteWithoutApplyIsRejectedForMethodJsonPlan(self, tmp_path):
+      f = Write(tmp_path / "main.py", "class Repo:\n   def Build(self):\n      return 1\n")
+
+      rc, data, err = RunPlan(f, "--name", "Build", "--to", "Make", "--allow-incomplete")
 
       assert rc == 2
       assert data == {}

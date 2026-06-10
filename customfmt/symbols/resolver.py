@@ -590,6 +590,7 @@ class _Resolver(ast.NodeVisitor):
          case ast.Name(id=name, lineno=ln, col_offset=co):
             call_extra = {"args": len(node.args)}
             self._AddRef(name, RefKind.Call, ln, co, extra=call_extra)
+            self._RecordGetattrStringReference(node, name)
             self._CallSites.add((ln, co))
          case ast.Attribute(
             attr=attr, value=ast.Name(id=receiver), lineno=ln, col_offset=co
@@ -625,6 +626,25 @@ class _Resolver(ast.NodeVisitor):
             self._CallSites.add((ln, co))
          case _:
             pass
+
+
+   def _RecordGetattrStringReference(self, node: ast.Call, name: str) -> None:
+      if name != "getattr" or len(node.args) < 2:
+         return
+      attr_arg = node.args[1]
+      if not isinstance(attr_arg, ast.Constant):
+         return
+      if not isinstance(attr_arg.value, str):
+         return
+      attr_name = attr_arg.value
+      if not attr_name.isidentifier():
+         return
+      self._AddRef(
+         attr_name, RefKind.AttrCall,
+         attr_arg.lineno, attr_arg.col_offset + 1,
+         dynamic=True,
+         extra={"full": ast.unparse(node), "dynamic_reason": "getattr_string"},
+      )
 
    def _RecordTarget(self, target: ast.expr, kind: DefKind) -> None:
       match target:
