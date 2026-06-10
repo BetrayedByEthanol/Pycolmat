@@ -298,7 +298,8 @@ modes.
 
 
 2. Read-only method refs (Phase 2A same-class self/cls implemented;
-   Phase 2B read-only class-owned calls implemented)
+   Phase 2B-A same-file class-owned calls implemented; Phase 2B-B imported
+   class-owned calls implemented)
 
    - safe direct `self.Method()` and `cls.Method()` calls inside the owning
      class method resolve to `kind: "method"` targets with receiver, owner
