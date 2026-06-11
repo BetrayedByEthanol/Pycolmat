@@ -1324,6 +1324,7 @@ class TestRenameSymbolApply:
       assert rc == 2
       assert out == ""
       assert "dynamic reference" in err
+      assert "--allow-incomplete cannot apply incomplete method plans" in err
       assert f.read_text(encoding="utf-8") == original
 
    def TestApplyAmbiguousImportedMethodRefusesAndWritesNothing(self, tmp_path):

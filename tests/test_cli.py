@@ -367,3 +367,77 @@ class TestCheckJSONSyntaxError:
       assert isinstance(data, list)
       # CF001 fires because 'bad_syntax.py' is valid snake_case,
       # but CF010 may fire due to indentation — just verify no crash.
+
+
+# ---------------------------------------------------------------------------
+# Stabilization smoke tests for read-only/reference/rename CLI commands
+# ---------------------------------------------------------------------------
+
+
+class TestStabilizationCliSmoke:
+   def WriteSafeProject(self, tmp_path):
+      src = (
+         "class UserModel:\n"
+         "   pass\n"
+         "\n"
+         "def BuildValue():\n"
+         "   return UserModel()\n"
+      )
+      return Write(tmp_path / "models.py", src)
+
+   def TestDoctorPrettySmoke(self, tmp_path, capsys):
+      f = self.WriteSafeProject(tmp_path)
+
+      rc = Run("doctor", str(f), "--pretty")
+
+      out = capsys.readouterr().out
+      data = json.loads(out)
+      assert rc == 0
+      assert data["python_file_count"] == 1
+      assert data["exit_code"] == 0
+
+   def TestRefsPrettySmoke(self, tmp_path, capsys):
+      f = self.WriteSafeProject(tmp_path)
+
+      rc = Run("refs", str(f), "--name", "UserModel", "--pretty")
+
+      out = capsys.readouterr().out
+      data = json.loads(out)
+      assert rc == 0
+      assert data["query"] == {"type": "name", "name": "UserModel"}
+      assert data["summary"]["definitions"] == 1
+      assert data["summary"]["references"] == 1
+
+   def TestRenameSymbolDiffSmokeDoesNotWrite(self, tmp_path, capsys):
+      f = self.WriteSafeProject(tmp_path)
+      original = f.read_text(encoding="utf-8")
+
+      rc = Run(
+         "rename-symbol", str(f), "--name", "UserModel", "--to", "AccountModel", "--diff"
+      )
+
+      out = capsys.readouterr().out
+      assert rc == 0
+      assert "---" in out
+      assert "+++" in out
+      assert "class AccountModel:" in out
+      assert "return AccountModel()" in out
+      assert f.read_text(encoding="utf-8") == original
+
+   def TestRenameSymbolApplySmokeWritesSafeTempProject(self, tmp_path, capsys):
+      f = self.WriteSafeProject(tmp_path)
+
+      rc = Run(
+         "rename-symbol", str(f), "--name", "UserModel", "--to", "AccountModel", "--apply"
+      )
+
+      out = capsys.readouterr().out
+      assert rc == 0
+      assert f"renamed {f}" in out
+      assert f.read_text(encoding="utf-8") == (
+         "class AccountModel:\n"
+         "   pass\n"
+         "\n"
+         "def BuildValue():\n"
+         "   return AccountModel()\n"
+      )

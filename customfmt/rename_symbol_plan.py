@@ -374,7 +374,11 @@ def _FormatIncompleteMethodPlanError(plan: RenameSymbolPlan) -> str:
    if plan.DynamicReferences:
       parts.append(f"{len(plan.DynamicReferences)} dynamic reference(s)")
    summary = ", ".join(parts)
-   return f"method rename plan is incomplete ({summary})"
+   return (
+      f"method rename plan is incomplete ({summary}); "
+      "method renames require every reference to be safely resolved, and "
+      "--allow-incomplete cannot apply incomplete method plans"
+   )
 
 
 def _DetectEditConflicts(plan: RenameSymbolPlan) -> None:
