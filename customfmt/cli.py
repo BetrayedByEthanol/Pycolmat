@@ -11,6 +11,7 @@ Commands
   customfmt resolve [--pretty] [--output PATH] <paths...>
   customfmt refs [--name NAME | --symbol PATH:LINE:COL] [--pretty] [--output PATH] <paths...>
   customfmt rename-symbol [--name NAME | --symbol PATH:LINE:COL] --to NAME [--pretty] [--output PATH] [--diff | --apply] [--allow-incomplete] <paths...>
+  customfmt deps [--json | --pretty] [--output PATH] <paths...>
 
 Aliases (console_scripts)
 --------------------------
@@ -47,6 +48,7 @@ from customfmt.rename_symbol_plan import PlanRenameSymbol
 from customfmt.rename_symbol_render import RenderPlanDiff, RenderPlanTextByFile
 from customfmt.symbols.project_graph import FindRefsByName, FindRefsBySymbol
 from customfmt.symbols.resolver import ResolveFile, ResolveResultSet
+from customfmt.symbols.import_scanner import ScanImports
 from customfmt.types import Violation
 
 # ---------------------------------------------------------------------------
@@ -341,6 +343,38 @@ def _BuildParser(prog: str = "customfmt") -> argparse.ArgumentParser:
          "With --apply only, allow applying safe planned edits even when "
          "the plan contains warnings or skipped/incomplete references."
       ),
+   )
+
+   # -- deps -----------------------------------------------------------------
+   deps_p = sub.add_parser(
+      "deps",
+      help="Scan imports and generate a requirements.in draft.",
+      description=(
+         "Walk Python files, identify external imports (including conditional "
+         "and platform-gated ones), and emit a requirements.in draft. "
+         "Does not modify any files."
+      ),
+   )
+   deps_p.add_argument(
+      "paths", nargs="+", metavar="PATH", help="Files or directories to scan."
+   )
+   deps_output = deps_p.add_mutually_exclusive_group()
+   deps_output.add_argument(
+      "--json",
+      action="store_true",
+      dest="json_out",
+      help="Output structured JSON instead of requirements.in format.",
+   )
+   deps_output.add_argument(
+      "--pretty",
+      action="store_true",
+      help="Output indented JSON.",
+   )
+   deps_p.add_argument(
+      "--output",
+      metavar="PATH",
+      default=None,
+      help="Write output to PATH instead of stdout.",
    )
 
    return parser
@@ -734,6 +768,50 @@ def _FormatIncompleteApplyError(plan) -> str:
    )
 
 
+def _CmdDeps(args: argparse.Namespace) -> int:
+   import json as _json
+
+   result, disc_errors = ScanImports(args.paths)
+
+   if disc_errors:
+      for err in disc_errors:
+         print(f"customfmt: error: {err}", file=sys.stderr)
+      return 2
+
+   if not result.Imports and not result.Errors:
+      # Check whether any files were found at all by re-collecting.
+      try:
+         from customfmt.discovery import CollectFiles
+         files = CollectFiles(args.paths)
+      except FileNotFoundError as exc:
+         print(f"customfmt: error: {exc}", file=sys.stderr)
+         return 2
+      if not files:
+         print("customfmt: no Python files found.", file=sys.stderr)
+         return 2
+
+   if result.Errors:
+      for err in result.Errors:
+         print(f"customfmt: warning: {err.FilePath}: {err.Error}", file=sys.stderr)
+
+   if args.json_out or args.pretty:
+      indent = 2 if args.pretty else None
+      serialised = _json.dumps(result.ToDict(), indent=indent)
+   else:
+      serialised = result.FormatRequirementsIn().rstrip("\n")
+
+   if args.output:
+      try:
+         WriteUtf8Lf(Path(args.output), serialised + "\n")
+      except OSError as exc:
+         print(f"customfmt: error writing {args.output}: {exc}", file=sys.stderr)
+         return 2
+   else:
+      print(serialised)
+
+   return 0
+
+
 # ---------------------------------------------------------------------------
 # Entry points
 # ---------------------------------------------------------------------------
@@ -760,6 +838,8 @@ def Main(argv: list[str] | None = None, *, prog: str = "customfmt") -> int:
          return _CmdRefs(args)
       elif args.command == "rename-symbol":
          return _CmdRenameSymbol(args)
+      elif args.command == "deps":
+         return _CmdDeps(args)
       else:  # pragma: no cover
          parser.print_help()
          return 2
