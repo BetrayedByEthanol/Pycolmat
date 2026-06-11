@@ -8,7 +8,8 @@
 - Added `rename-symbol` JSON planning for safe `MethodDef` targets, including direct method definitions and safely resolved method references.
 - Added read-only `rename-symbol --diff` support for safe method rename plans.
 - Added guarded `rename-symbol --apply` support for complete method rename plans.
-- Blocked incomplete method rename plans when dynamic references, unresolved references, skipped items, warnings, edit conflicts, or method-name collisions are present; `--allow-incomplete` does not override method apply guards.
+- Documented that method rename-symbol JSON, diff, and apply modes are supported only for complete safe plans.
+- Blocked incomplete method rename plans when dynamic, inherited, `super()`, arbitrary `obj.Method()`, `getattr()`, string, unresolved, skipped, warning, edit-conflict, or method-name collision cases are present; `--allow-incomplete` does not override method apply guards.
 - Added `customfmt doctor` diagnostics for namespace package ambiguity.
 
 ## v0.1.0 - 2026-06-05
