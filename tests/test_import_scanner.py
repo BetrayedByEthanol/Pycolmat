@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from customfmt.cli import Main
-from customfmt.symbols.import_scanner import ScanImports, _InferMarkerFromTest, STDLIB
+from customfmt.symbols.import_scanner import STDLIB, ScanImports, _InferMarkerFromTest
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -150,7 +150,7 @@ class TestScanImports:
       assert len(entries[0].Locations) == 2
 
    def TestLocationFormat(self, tmp_path):
-      f = Write(tmp_path / "mod.py", "import requests\n")
+      Write(tmp_path / "mod.py", "import requests\n")
       result, errs = ScanImports([str(tmp_path)])
       entry = next(e for e in result.Imports if e.PackageName == "requests")
       assert any("mod.py" in loc for loc in entry.Locations)
@@ -338,7 +338,7 @@ class TestDepsCli:
       assert rc == 0
       out = capsys.readouterr().out
       # No packages emitted beyond the header comment
-      lines = [l for l in out.splitlines() if l and not l.startswith("#")]
+      lines = [line for line in out.splitlines() if line and not line.startswith("#")]
       assert lines == []
 
    def TestConditionalInOutput(self, tmp_path, capsys):
