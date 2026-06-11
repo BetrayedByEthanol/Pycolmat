@@ -10,6 +10,7 @@ from pathlib import Path
 
 from customfmt.cli import Main
 from customfmt.rename_symbol_plan import RenameSymbolEdit, RenameSymbolPlan
+from customfmt.symbols.project_graph import ProjectDefinition
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -1090,18 +1091,308 @@ class TestRenameSymbolApply:
       return rc, out.getvalue(), err.getvalue()
 
 
-   def TestApplyRejectsMethodRenameAndWritesNothing(self, tmp_path):
+   def TestApplySafeSelfMethodWritesDefinitionAndSelfReference(self, tmp_path):
       f = Write(
          tmp_path / "main.py",
-         "class Repo:\n   def Build(self):\n      return self.Build()\n",
+         Src(
+            """
+            class Repo:
+               def Run(self):
+                  return self.Build()
+
+               def Build(self):
+                  return 1
+            """
+         ),
       )
-      original = f.read_text(encoding="utf-8")
+
+      rc, out, err = self.RunApply(f, "--name", "Build", "--to", "Make")
+
+      assert rc == 0
+      assert err == ""
+      assert f"renamed {f}" in out
+      text = f.read_text(encoding="utf-8")
+      assert "return self.Make()" in text
+      assert "def Make(self):" in text
+      assert "Build" not in text
+
+   def TestApplySafeClsMethodWritesDefinitionAndClsReference(self, tmp_path):
+      f = Write(
+         tmp_path / "main.py",
+         Src(
+            """
+            class Repo:
+               @classmethod
+               def Run(cls):
+                  return cls.Build()
+
+               @classmethod
+               def Build(cls):
+                  return 1
+            """
+         ),
+      )
+
+      rc, out, err = self.RunApply(f, "--name", "Build", "--to", "Make")
+
+      assert rc == 0
+      assert err == ""
+      assert f"renamed {f}" in out
+      text = f.read_text(encoding="utf-8")
+      assert "return cls.Make()" in text
+      assert "def Make(cls):" in text
+      assert "Build" not in text
+
+   def TestApplySafeSameFileClassMethodWritesDefinitionAndClassReference(self, tmp_path):
+      f = Write(
+         tmp_path / "main.py",
+         Src(
+            """
+            class Repo:
+               def Build(self):
+                  return 1
+
+            def Run(repo):
+               return Repo.Build(repo)
+            """
+         ),
+      )
+
+      rc, out, err = self.RunApply(f, "--name", "Build", "--to", "Make")
+
+      assert rc == 0
+      assert err == ""
+      assert f"renamed {f}" in out
+      text = f.read_text(encoding="utf-8")
+      assert "def Make(self):" in text
+      assert "return Repo.Make(repo)" in text
+      assert "Build" not in text
+
+   def TestApplySafeImportedClassMethodWritesDefinitionAndImportedReference(self, tmp_path):
+      pkg = Package(tmp_path)
+      model = Write(
+         pkg / "models.py",
+         Src(
+            """
+            class Repo:
+               def Build(self):
+                  return 1
+            """
+         ),
+      )
+      main = Write(
+         pkg / "main.py",
+         Src(
+            """
+            from pkg.models import Repo
+
+            def Run(repo):
+               return Repo.Build(repo)
+            """
+         ),
+      )
+
+      rc, out, err = self.RunApply(pkg, "--name", "Build", "--to", "Make")
+
+      assert rc == 0
+      assert err == ""
+      assert f"renamed {model}" in out
+      assert f"renamed {main}" in out
+      assert "def Make(self):" in model.read_text(encoding="utf-8")
+      main_text = main.read_text(encoding="utf-8")
+      assert "return Repo.Make(repo)" in main_text
+      assert "Build" not in main_text
+
+   def TestApplyMethodWriteFailureRollsBackAllFiles(self, tmp_path, monkeypatch):
+      pkg = Package(tmp_path)
+      model_original = Src(
+         """
+         class Repo:
+            def Build(self):
+               return 1
+         """
+      )
+      main_original = Src(
+         """
+         from pkg.models import Repo
+
+         def Run(repo):
+            return Repo.Build(repo)
+         """
+      )
+      model = Write(pkg / "models.py", model_original)
+      main = Write(pkg / "main.py", main_original)
+      calls = {"count": 0}
+
+      def FailSecondWrite(path, text):
+         calls["count"] += 1
+         if calls["count"] == 2:
+            raise OSError("simulated write failure")
+         path.write_text(text.replace("\r\n", "\n"), encoding="utf-8", newline="\n")
+
+      monkeypatch.setattr("customfmt.cli.WriteUtf8Lf", FailSecondWrite)
+
+      rc, out, err = self.RunApply(pkg, "--name", "Build", "--to", "Make")
+
+      assert rc == 2
+      assert out == ""
+      assert "simulated write failure" in err
+      assert model.read_text(encoding="utf-8") == model_original
+      assert main.read_text(encoding="utf-8") == main_original
+
+   def TestApplyIncompleteMethodPlanRefusesAndWritesNothing(self, tmp_path):
+      original = Src(
+         """
+         class Repo:
+            def Build(self):
+               return 1
+
+         def Run(obj):
+            return obj.Build()
+         """
+      )
+      f = Write(tmp_path / "main.py", original)
 
       rc, out, err = self.RunApply(f, "--name", "Build", "--to", "Make")
 
       assert rc == 2
       assert out == ""
-      assert "method apply not supported yet" in err
+      assert "method rename plan is incomplete" in err
+      assert f.read_text(encoding="utf-8") == original
+
+   def TestApplyMethodCollisionRefusesAndWritesNothing(self, tmp_path):
+      original = Src(
+         """
+         class Repo:
+            def ExistingMethod(self):
+               return 1
+
+            def Helper(self):
+               return 2
+         """
+      )
+      f = Write(tmp_path / "main.py", original)
+
+      rc, out, err = self.RunApply(f, "--name", "Helper", "--to", "ExistingMethod")
+
+      assert rc == 2
+      assert out == ""
+      assert "method rename plan is incomplete" in err
+      assert f.read_text(encoding="utf-8") == original
+
+   def TestApplyMethodTokenMismatchRefusesAndWritesNothing(self, tmp_path, monkeypatch):
+      original = "class Repo:\n   def Build(self):\n      return 1\n"
+      f = Write(tmp_path / "main.py", original)
+      target = ProjectDefinition(
+         Name          = "Build",
+         Kind          = "method",
+         FilePath      = str(f),
+         Line          = 2,
+         Col           = 3,
+         ScopeId       = "repo",
+         ScopeName     = "Repo",
+         Confidence    = "local_resolved",
+         QualifiedName = "Repo.Build",
+         Extra         = {"owner_class_name": "Repo"},
+      )
+      plan = RenameSymbolPlan(Query={}, Target=target, NewName="Make")
+      plan.Edits.append(RenameSymbolEdit(str(f), 2, 7, "Other", "Make", "definition:method"))
+      monkeypatch.setattr("customfmt.cli.PlanRenameSymbol", lambda *args, **kwargs: (plan, []))
+
+      rc, out, err = self.RunApply(f, "--name", "Build", "--to", "Make")
+
+      assert rc == 2
+      assert out == ""
+      assert "expected 'Other'" in err
+      assert f.read_text(encoding="utf-8") == original
+
+   def TestApplyDynamicObjMethodRefusesAndWritesNothing(self, tmp_path):
+      original = Src(
+         """
+         class Repo:
+            def Build(self):
+               return 1
+
+         def Run(obj):
+            return obj.Build()
+         """
+      )
+      f = Write(tmp_path / "main.py", original)
+
+      rc, out, err = self.RunApply(f, "--name", "Build", "--to", "Make")
+
+      assert rc == 2
+      assert out == ""
+      assert "dynamic reference" in err
+      assert f.read_text(encoding="utf-8") == original
+
+   def TestApplyAmbiguousImportedMethodRefusesAndWritesNothing(self, tmp_path):
+      first = tmp_path / "first"
+      second = tmp_path / "second"
+      model_original = "class Repo:\n   def Build(self):\n      return 1\n"
+      main_original = Src(
+         """
+         from ns.models import Repo
+
+         def Run(repo):
+            return Repo.Build(repo)
+         """
+      )
+      model = Write(first / "ns" / "models.py", model_original)
+      Write(second / "ns" / "models.py", "class Repo:\n   def Build(self):\n      return 2\n")
+      main = Write(first / "ns" / "main.py", main_original)
+      symbol = f"{model}:2:3"
+
+      rc, out, err = self.RunApply([str(first), str(second)], "--symbol", symbol, "--to", "Make")
+
+      assert rc == 2
+      assert out == ""
+      assert "method rename plan is incomplete" in err
+      assert model.read_text(encoding="utf-8") == model_original
+      assert main.read_text(encoding="utf-8") == main_original
+
+   def TestApplyExternalImportedMethodRefusesAndWritesNothing(self, tmp_path):
+      original = Src(
+         """
+         class Repo:
+            def Build(self):
+               return 1
+
+         from external.models import Repo as ExternalRepo
+
+         def Run(repo):
+            return ExternalRepo.Build(repo)
+         """
+      )
+      f = Write(tmp_path / "main.py", original)
+
+      rc, out, err = self.RunApply(f, "--name", "Build", "--to", "Make")
+
+      assert rc == 2
+      assert out == ""
+      assert "method rename plan is incomplete" in err
+      assert f.read_text(encoding="utf-8") == original
+
+   def TestApplyAllowIncompleteDoesNotPermitIncompleteMethodApply(self, tmp_path):
+      original = Src(
+         """
+         class Repo:
+            def Build(self):
+               return 1
+
+         def Run(obj):
+            return obj.Build()
+         """
+      )
+      f = Write(tmp_path / "main.py", original)
+
+      rc, out, err = self.RunApply(
+         f, "--name", "Build", "--to", "Make", "--allow-incomplete"
+      )
+
+      assert rc == 2
+      assert out == ""
+      assert "method rename plan is incomplete" in err
       assert f.read_text(encoding="utf-8") == original
 
    def TestApplyUpdatesSafeNamespacePackageCase(self, tmp_path):

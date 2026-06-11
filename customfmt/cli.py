@@ -42,7 +42,7 @@ from customfmt.discovery import CollectFiles
 from customfmt.doctor import DoctorPaths, FormatHuman
 from customfmt.formatter import ProcessFile
 from customfmt.indexer import IndexPaths
-from customfmt.io import WriteUtf8Lf
+from customfmt.io import ReadUtf8Text, WriteUtf8Lf
 from customfmt.rename_plan import PlanFile
 from customfmt.rename_symbol_plan import PlanRenameSymbol
 from customfmt.rename_symbol_render import RenderPlanDiff, RenderPlanTextByFile
@@ -702,9 +702,11 @@ def _CmdRenameSymbol(args: argparse.Namespace) -> int:
 
    if args.apply:
       if _PlanTargetsMethod(plan):
-         print("customfmt: error: method apply not supported yet", file=sys.stderr)
-         return 2
-      if not args.allow_incomplete and _PlanHasIncompleteApplySignals(plan):
+         method_error = _FormatIncompleteMethodApplyError(plan)
+         if method_error:
+            print(method_error, file=sys.stderr)
+            return 2
+      elif not args.allow_incomplete and _PlanHasIncompleteApplySignals(plan):
          print(_FormatIncompleteApplyError(plan), file=sys.stderr)
          return 2
       try:
@@ -713,8 +715,7 @@ def _CmdRenameSymbol(args: argparse.Namespace) -> int:
          print(f"customfmt: error: {exc}", file=sys.stderr)
          return 2
       try:
-         for path, rewritten in rendered_by_file.items():
-            WriteUtf8Lf(path, rewritten)
+         _WriteRenderedPlanFiles(rendered_by_file)
       except OSError as exc:
          print(f"customfmt: error writing renamed file: {exc}", file=sys.stderr)
          return 2
@@ -737,6 +738,19 @@ def _CmdRenameSymbol(args: argparse.Namespace) -> int:
    return 0
 
 
+def _WriteRenderedPlanFiles(rendered_by_file: dict[Path, str]) -> None:
+   originals = {path: ReadUtf8Text(path) for path in rendered_by_file}
+   written: list[Path] = []
+   try:
+      for path, rewritten in rendered_by_file.items():
+         WriteUtf8Lf(path, rewritten)
+         written.append(path)
+   except OSError:
+      for path in reversed(written):
+         WriteUtf8Lf(path, originals[path])
+      raise
+
+
 def _PlanTargetsMethod(plan) -> bool:
    target = getattr(plan, "Target", None)
    return target is not None and getattr(target, "Kind", None) == "method"
@@ -748,6 +762,38 @@ def _PlanHasIncompleteApplySignals(plan) -> bool:
       or plan.Skipped
       or plan.UnresolvedReferences
       or plan.DynamicReferences
+   )
+
+
+def _FormatIncompleteMethodApplyError(plan) -> str | None:
+   parts: list[str] = []
+   target = getattr(plan, "Target", None)
+   if target is None or getattr(target, "Kind", None) != "method":
+      parts.append("unsupported method target")
+   else:
+      extra = getattr(target, "Extra", {})
+      if not isinstance(extra, dict) or not extra.get("owner_class_name"):
+         parts.append("missing owning class")
+
+   edits = getattr(plan, "Edits", [])
+   if not any(getattr(edit, "Kind", "") == "definition:method" for edit in edits):
+      parts.append("missing method definition edit")
+
+   if getattr(plan, "Warnings", []):
+      parts.append(f"{len(plan.Warnings)} warning(s)")
+   if getattr(plan, "Skipped", []):
+      parts.append(f"{len(plan.Skipped)} skipped item(s)")
+   if getattr(plan, "UnresolvedReferences", []):
+      parts.append(f"{len(plan.UnresolvedReferences)} unresolved reference(s)")
+   if getattr(plan, "DynamicReferences", []):
+      parts.append(f"{len(plan.DynamicReferences)} dynamic reference(s)")
+
+   if not parts:
+      return None
+   summary = ", ".join(parts)
+   return (
+      "customfmt: error: rename-symbol --apply refused incomplete method plan "
+      f"({summary}); --allow-incomplete cannot apply method rename plans"
    )
 
 
