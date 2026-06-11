@@ -309,20 +309,26 @@ customfmt rename-symbol src/ --name UserModel --to AccountModel --apply --allow-
 guarded use. It is not an IDE-level refactor engine, and it intentionally does
 not support every Python reference pattern. It emits JSON by default, pretty
 JSON with `--pretty`, writes JSON with `--output PATH`, renders a read-only
-unified diff with `--diff`, and applies guarded token edits with `--apply`.
-When `--diff` is used, JSON is not printed and source files are not modified.
-Diff mode is read-only, so it renders proposed token edits to stdout without
-applying them to source files. `--apply` reuses the same token renderer and
-validation path as diff mode: every affected file is rendered first, every
-planned edit must target an existing `NAME` token whose text matches the
-recorded `old` value, and no source file is written if validation fails for
-any affected file. Apply mode writes files with UTF-8 LF normalization and
-prints `renamed <path>` for each written file; if the plan has no edits, it
-prints nothing and exits 0. By default, `--apply` refuses to write and exits 2
-when the plan contains any `warnings`, `skipped`, `unresolved_references`, or
-`dynamic_references`. Use `--apply --allow-incomplete` only when you have
-reviewed the JSON or diff and want to apply the safe planned token edits while
-leaving incomplete, skipped, or dynamic sites untouched. Always run tests after
+unified diff with `--diff`, and applies guarded token edits with `--apply` for
+supported apply targets. Method targets are preview-only: JSON planning and
+read-only diff rendering are supported for complete safe method plans, but
+method `--apply` intentionally exits 2 without writing files. When `--diff` is
+used, JSON is not printed and source files are not modified. Diff mode is
+read-only, so it renders proposed token edits to stdout without applying them
+to source files. `--apply` reuses the same token renderer and validation path
+as diff mode for supported apply targets: every affected file is rendered
+first, every planned edit must target an existing `NAME` token whose text
+matches the recorded `old` value, and no source file is written if validation
+fails for any affected file. Apply mode writes files with UTF-8 LF
+normalization and prints `renamed <path>` for each written file; if the plan
+has no edits, it prints nothing and exits 0. By default, `--apply` refuses to
+write and exits 2 when the plan contains any `warnings`, `skipped`,
+`unresolved_references`, or `dynamic_references`. Method JSON and diff plans
+also require completeness and exit 2 when dynamic references, unresolved
+references, skipped items, or warnings are present. Use `--apply
+--allow-incomplete` only when you have reviewed the JSON or diff and want to
+apply the safe planned token edits for non-method targets while leaving
+incomplete, skipped, or dynamic sites untouched. Always run tests after
 applying a project-wide rename. `--allow-incomplete` is apply-only; using it
 with JSON plan mode or `--diff` exits 2. `--apply` cannot be combined with
 `--diff`, `--output`, or `--pretty`. `--diff` cannot be combined with
@@ -368,6 +374,7 @@ Supported v1 rename sites are conservative:
 | Safe relative imports | Supported | `from .module import Name`, `from ..package.module import Name`, `from . import module`, and `from .. import module` resolve only when the target module exists unambiguously inside scanned regular packages or namespace-package-like directories. |
 | Annotations | Supported | Safe resolved annotation name tokens are planned. |
 | Constructor and call references | Supported | Safe resolved call tokens such as `UserModel()` and `BuildValue()` are planned. |
+| Methods | JSON/diff planning supported; apply unsupported | Safe method definitions and safely resolved direct method references can be planned as JSON or rendered with `--diff`. Method `--apply` is intentionally rejected. |
 
 Unsupported v1 patterns are excluded from edits and reported as skipped,
 unresolved, or dynamic when detected:
@@ -375,11 +382,13 @@ unresolved, or dynamic when detected:
 | Pattern | Status | Notes |
 |---------|--------|-------|
 | Local variables | Unsupported | Use `customfmt rename` for local variable cleanup. |
-| Methods | Unsupported | Do not rename method definitions with `rename-symbol`, including same-class `self.Method()` or `cls.Method()` references that the read-only resolver can identify. |
+| Method `--apply` | Unsupported | Method rename plans are preview-only. Applying method edits is intentionally rejected until method rename support is complete. |
+| Dynamic, inherited, or unresolved method references | Unsupported/blocking | `obj.Method()`, inherited method lookups, unresolved imported class references, ambiguous method references, and other unsafe method sites are not guessed and block method JSON/diff plans. |
+| `super().Method()` | Unsupported/blocking | Super and MRO lookups are dynamic for rename purposes and block method plans when detected. |
+| String or dynamic method references | Unsupported/blocking | `getattr(obj, "Method")`, string references, `globals()`, `importlib`, `eval`, and `exec` are never rewritten and block incomplete method plans when detected. |
 | Instance attributes | Unsupported | Includes direct attribute definitions and reads. |
 | Class attributes | Unsupported | Class-body declarations are not project-wide rename targets. |
-| `self.X` | Unsupported | Treated as dynamic/attribute-based unless it is a safe same-class `self.Method()` resolver reference, which is still not a rename target. |
-| `obj.Method()` / `super().Method()` | Unsupported | Dynamic attribute calls, inherited methods, and MRO lookups are not guessed. |
+| `self.X` | Unsupported | Treated as dynamic/attribute-based unless it is a safe same-class `self.Method()` or `cls.Method()` resolver reference that belongs to a complete preview-only method plan. |
 | Wildcard imports | Unsupported | `from module import *` references stay unresolved for rename purposes. |
 | Unresolved imports | Unsupported | Relative imports outside scanned paths, relative imports beyond the package root, ambiguous namespace-package cases, ambiguous imports, or missing targets stay unresolved and block apply by default. |
 | String references | Unsupported | Strings are never rewritten. |
