@@ -46,10 +46,11 @@ from customfmt.io import WriteUtf8Lf
 from customfmt.rename_plan import PlanFile
 from customfmt.rename_symbol_plan import PlanRenameSymbol
 from customfmt.rename_symbol_render import RenderPlanDiff, RenderPlanTextByFile
+from customfmt.symbols.import_scanner import ScanImports
 from customfmt.symbols.project_graph import FindRefsByName, FindRefsBySymbol
 from customfmt.symbols.resolver import ResolveFile, ResolveResultSet
-from customfmt.symbols.import_scanner import ScanImports
 from customfmt.types import Violation
+
 
 # ---------------------------------------------------------------------------
 # Argument parser
