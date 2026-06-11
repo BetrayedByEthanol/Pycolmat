@@ -31,7 +31,6 @@ from __future__ import annotations
 
 import argparse
 import json
-from pathlib import Path
 import re
 import sys
 import textwrap
@@ -50,6 +49,8 @@ from customfmt.symbols.import_scanner import ScanImports
 from customfmt.symbols.project_graph import FindRefsByName, FindRefsBySymbol
 from customfmt.symbols.resolver import ResolveFile, ResolveResultSet
 from customfmt.types import Violation
+
+from pathlib import Path
 
 
 # ---------------------------------------------------------------------------
