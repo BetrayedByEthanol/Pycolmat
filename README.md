@@ -310,9 +310,11 @@ guarded use. It is not an IDE-level refactor engine, and it intentionally does
 not support every Python reference pattern. It emits JSON by default, pretty
 JSON with `--pretty`, writes JSON with `--output PATH`, renders a read-only
 unified diff with `--diff`, and applies guarded token edits with `--apply` for
-supported apply targets. Method targets are preview-only: JSON planning and
-read-only diff rendering are supported for complete safe method plans, but
-method `--apply` intentionally exits 2 without writing files. When `--diff` is
+supported apply targets. Method targets support JSON planning, read-only diff
+rendering, and guarded `--apply` only for complete safe method plans. Method
+`--apply` exits 2 without writing files when a method plan has any warnings,
+skipped items, unresolved references, dynamic references, edit conflicts, or
+definition/name collisions. When `--diff` is
 used, JSON is not printed and source files are not modified. Diff mode is
 read-only, so it renders proposed token edits to stdout without applying them
 to source files. `--apply` reuses the same token renderer and validation path
@@ -325,11 +327,14 @@ has no edits, it prints nothing and exits 0. By default, `--apply` refuses to
 write and exits 2 when the plan contains any `warnings`, `skipped`,
 `unresolved_references`, or `dynamic_references`. Method JSON and diff plans
 also require completeness and exit 2 when dynamic references, unresolved
-references, skipped items, or warnings are present. Use `--apply
---allow-incomplete` only when you have reviewed the JSON or diff and want to
-apply the safe planned token edits for non-method targets while leaving
-incomplete, skipped, or dynamic sites untouched. Always run tests after
-applying a project-wide rename. `--allow-incomplete` is apply-only; using it
+references, skipped items, or warnings are present. Method `--apply` uses the
+same completeness rule and is all-or-nothing: every affected file is validated
+in memory before any file is written. Use `--apply --allow-incomplete` only
+when you have reviewed the JSON or diff and want to apply the safe planned
+token edits for non-method targets while leaving incomplete, skipped, or
+dynamic sites untouched. `--allow-incomplete` does not permit incomplete
+method apply. Always run tests after applying a project-wide rename.
+`--allow-incomplete` is apply-only; using it
 with JSON plan mode or `--diff` exits 2. `--apply` cannot be combined with
 `--diff`, `--output`, or `--pretty`. `--diff` cannot be combined with
 `--output`; that incompatible option pair exits with code 2 before writing any
@@ -374,7 +379,7 @@ Supported v1 rename sites are conservative:
 | Safe relative imports | Supported | `from .module import Name`, `from ..package.module import Name`, `from . import module`, and `from .. import module` resolve only when the target module exists unambiguously inside scanned regular packages or namespace-package-like directories. |
 | Annotations | Supported | Safe resolved annotation name tokens are planned. |
 | Constructor and call references | Supported | Safe resolved call tokens such as `UserModel()` and `BuildValue()` are planned. |
-| Methods | JSON/diff planning supported; apply unsupported | Safe method definitions and safely resolved direct method references can be planned as JSON or rendered with `--diff`. Method `--apply` is intentionally rejected. |
+| Methods | Supported for complete plans | Safe method definitions and safely resolved direct method references can be planned as JSON, rendered with `--diff`, or applied with guarded `--apply` when the method plan is complete. |
 
 Unsupported v1 patterns are excluded from edits and reported as skipped,
 unresolved, or dynamic when detected:
@@ -382,13 +387,13 @@ unresolved, or dynamic when detected:
 | Pattern | Status | Notes |
 |---------|--------|-------|
 | Local variables | Unsupported | Use `customfmt rename` for local variable cleanup. |
-| Method `--apply` | Unsupported | Method rename plans are preview-only. Applying method edits is intentionally rejected until method rename support is complete. |
+| Incomplete method `--apply` | Unsupported/blocking | Method apply is allowed only for complete method plans. `--allow-incomplete` does not override method completeness guards. |
 | Dynamic, inherited, or unresolved method references | Unsupported/blocking | `obj.Method()`, inherited method lookups, unresolved imported class references, ambiguous method references, and other unsafe method sites are not guessed and block method JSON/diff plans. |
 | `super().Method()` | Unsupported/blocking | Super and MRO lookups are dynamic for rename purposes and block method plans when detected. |
 | String or dynamic method references | Unsupported/blocking | `getattr(obj, "Method")`, string references, `globals()`, `importlib`, `eval`, and `exec` are never rewritten and block incomplete method plans when detected. |
 | Instance attributes | Unsupported | Includes direct attribute definitions and reads. |
 | Class attributes | Unsupported | Class-body declarations are not project-wide rename targets. |
-| `self.X` | Unsupported | Treated as dynamic/attribute-based unless it is a safe same-class `self.Method()` or `cls.Method()` resolver reference that belongs to a complete preview-only method plan. |
+| `self.X` | Unsupported | Treated as dynamic/attribute-based unless it is a safe same-class `self.Method()` or `cls.Method()` resolver reference that belongs to a complete method plan. |
 | Wildcard imports | Unsupported | `from module import *` references stay unresolved for rename purposes. |
 | Unresolved imports | Unsupported | Relative imports outside scanned paths, relative imports beyond the package root, ambiguous namespace-package cases, ambiguous imports, or missing targets stay unresolved and block apply by default. |
 | String references | Unsupported | Strings are never rewritten. |

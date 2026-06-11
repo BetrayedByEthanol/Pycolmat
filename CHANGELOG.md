@@ -7,8 +7,8 @@
 - Added the public `InspectProjectModules` module inspection API.
 - Added `rename-symbol` JSON planning for safe `MethodDef` targets, including direct method definitions and safely resolved method references.
 - Added read-only `rename-symbol --diff` support for safe method rename plans.
-- Kept method `rename-symbol --apply` intentionally unsupported; method plans are preview-only for JSON and diff.
-- Blocked incomplete method rename plans when dynamic references, unresolved references, skipped items, or warnings are present.
+- Added guarded `rename-symbol --apply` support for complete method rename plans.
+- Blocked incomplete method rename plans when dynamic references, unresolved references, skipped items, warnings, edit conflicts, or method-name collisions are present; `--allow-incomplete` does not override method apply guards.
 - Added `customfmt doctor` diagnostics for namespace package ambiguity.
 
 ## v0.1.0 - 2026-06-05
