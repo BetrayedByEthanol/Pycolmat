@@ -387,6 +387,34 @@ replacement.
      edit, and only resolved references that match that same owner class and
      method target
 
+   Method apply is allowed only for complete method plans. A complete method
+   plan must have all of the following properties before any file may be
+   written:
+
+   - zero warnings;
+
+   - zero skipped items;
+
+   - zero unresolved references;
+
+   - zero dynamic references;
+
+   - zero edit conflicts; and
+
+   - zero definition/name collisions.
+
+   Apply must reuse the same guarded token renderer used by diff mode. Before
+   writing any file, apply must validate every affected file through that token
+   renderer and reject the entire operation if any token mismatch or validation
+   failure is found. Apply must be all-or-nothing: a rejected method plan must
+   write no files, and a failure in one affected file must not leave partial
+   writes in any other affected file.
+
+   `--allow-incomplete` must not permit method apply unless a later design
+   explicitly changes this rule. Until such a design exists, incomplete method
+   plans are planning/diff-only and must refuse apply.
+
+   Require full test coverage before enabling.
    - refuse method `--apply` with exit code `2` and write nothing when the plan
      contains any warnings, skipped items, unresolved references, dynamic
      references, unsupported references, incomplete-reference markers, or other
@@ -416,6 +444,24 @@ replacement.
 ## Test Plan
 
 Future implementation should add focused tests before enabling apply support.
+
+### Phase 4 Intended Apply Tests
+
+* safe `self.Method()` apply writes the method definition and `self`
+  reference;
+* safe `cls.Method()` apply writes the method definition and `cls` reference;
+* safe same-file `ClassName.Method()` apply writes the method definition and
+  class reference;
+* safe imported `ClassName.Method()` apply writes the method definition and
+  imported class reference across files;
+* incomplete method plan refuses apply and writes nothing;
+* collision refuses apply and writes nothing;
+* token mismatch refuses apply and writes nothing;
+* dynamic `obj.Method()` refuses apply and writes nothing;
+* ambiguous or external imported method references refuse apply and write
+  nothing; and
+* `--allow-incomplete` does not permit method apply unless a later design
+  explicitly allows it.
 
 ### Resolver And Indexer Tests
 
