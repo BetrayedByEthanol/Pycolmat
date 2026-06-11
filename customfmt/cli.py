@@ -31,10 +31,10 @@ from __future__ import annotations
 
 import argparse
 import json
+from pathlib import Path
 import re
 import sys
 import textwrap
-from pathlib import Path
 
 from customfmt import __version__
 from customfmt.checker import CheckFile
