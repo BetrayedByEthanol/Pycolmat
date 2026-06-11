@@ -62,13 +62,7 @@ from customfmt.symbols.model import (
 # Stdlib set
 # ---------------------------------------------------------------------------
 
-def _BuildStdlibSet() -> frozenset[str]:
-   base: set[str] = set()
-   if hasattr(sys, "stdlib_module_names"):
-      base.update(sys.stdlib_module_names)
-   # Supplement for common top-level names that may be missing on older pythons
-   # or that are distribution-level packages confused with stdlib.
-   base.update({
+STDLIB_SUPPLEMENT: frozenset[str] = frozenset({
       "__future__", "_thread", "abc", "aifc", "argparse", "ast", "asynchat",
       "asyncio", "asyncore", "atexit", "audioop", "base64", "bdb", "binascii",
       "binhex", "bisect", "builtins", "bz2", "calendar", "cgi", "cgitb",
@@ -101,11 +95,11 @@ def _BuildStdlibSet() -> frozenset[str]:
       "venv", "warnings", "wave", "weakref", "webbrowser", "winreg",
       "winsound", "wsgiref", "xdrlib", "xml", "xmlrpc", "zipapp",
       "zipfile", "zipimport", "zlib", "zoneinfo",
-   })
-   return frozenset(base)
+})
 
-
-STDLIB: frozenset[str] = _BuildStdlibSet()
+STDLIB: frozenset[str] = frozenset(
+   set(getattr(sys, "stdlib_module_names", ())) | set(STDLIB_SUPPLEMENT)
+)
 
 # ---------------------------------------------------------------------------
 # Platform marker inference
@@ -130,6 +124,42 @@ _NEGATED_MAP: dict[str, str] = {
    'sys_platform == "linux"':  'sys_platform != "linux"',
    'sys_platform == "darwin"': 'sys_platform != "darwin"',
    'sys_platform != "win32"':  'sys_platform == "win32"',
+}
+
+
+# ---------------------------------------------------------------------------
+# Package name normalisation
+# ---------------------------------------------------------------------------
+
+# A small set of well-known import->package name mismatches.
+_IMPORT_TO_PACKAGE: dict[str, str] = {
+   "cv2":           "opencv-python",
+   "PIL":           "Pillow",
+   "sklearn":       "scikit-learn",
+   "skimage":       "scikit-image",
+   "bs4":           "beautifulsoup4",
+   "yaml":          "PyYAML",
+   "gi":            "PyGObject",
+   "wx":            "wxPython",
+   "Crypto":        "pycryptodome",
+   "OpenSSL":       "pyOpenSSL",
+   "usb":           "pyusb",
+   "serial":        "pyserial",
+   "dateutil":      "python-dateutil",
+   "dotenv":        "python-dotenv",
+   "jose":          "python-jose",
+   "magic":         "python-magic",
+   "slugify":       "python-slugify",
+   "MySQLdb":       "mysqlclient",
+   "apt":           "python-apt",
+   "dbus":          "dbus-python",
+   "gtk":           "PyGTK",
+   "pkg_resources": "setuptools",
+   "win32api":      "pywin32",
+   "win32con":      "pywin32",
+   "win32gui":      "pywin32",
+   "pywintypes":    "pywin32",
+   "winreg":        "",            # stdlib on Windows — filtered elsewhere
 }
 
 
@@ -210,8 +240,8 @@ def _InferMarkerFromTest(test_node: ast.expr, negated: bool = False) -> str | No
 @dataclass
 class _IfContext:
    """Records an If node and whether the import is in the else branch."""
-   node:    ast.If
-   negated: bool   # True when import is in orelse, not body
+   node    : ast.If
+   negated : bool   # True when import is in orelse, not body
 
 
 def _FindEnclosingIf(tree: ast.Module, target_line: int) -> _IfContext | None:
@@ -251,12 +281,12 @@ def _FindEnclosingIf(tree: ast.Module, target_line: int) -> _IfContext | None:
 class ImportEntry:
    """One deduplicated external import, with platform annotation."""
 
-   PackageName   : str              # top-level pip package name (guessed)
-   ImportedName  : str              # as written in source, e.g. "PIL.Image"
-   Locations     : list[str]        # "file:line" strings
-   IsConditional : bool             # inside a function / if scope
-   PlatformMarker: str | None       # PEP 508 marker or None
-   NeedsReview   : bool             # marker ambiguous — human must check
+   PackageName    : str              # top-level pip package name (guessed)
+   ImportedName   : str              # as written in source, e.g. "PIL.Image"
+   Locations      : list[str]        # "file:line" strings
+   IsConditional  : bool             # inside a function / if scope
+   PlatformMarker : str | None       # PEP 508 marker or None
+   NeedsReview    : bool             # marker ambiguous — human must check
 
    def ToDict(self) -> dict:
       return {
@@ -322,42 +352,6 @@ class ImportScanResult:
             lines.append(entry.RequirementsLine())
 
       return "\n".join(lines) + "\n"
-
-
-# ---------------------------------------------------------------------------
-# Package name normalisation
-# ---------------------------------------------------------------------------
-
-# A small set of well-known import->package name mismatches.
-_IMPORT_TO_PACKAGE: dict[str, str] = {
-   "cv2":           "opencv-python",
-   "PIL":           "Pillow",
-   "sklearn":       "scikit-learn",
-   "skimage":       "scikit-image",
-   "bs4":           "beautifulsoup4",
-   "yaml":          "PyYAML",
-   "gi":            "PyGObject",
-   "wx":            "wxPython",
-   "Crypto":        "pycryptodome",
-   "OpenSSL":       "pyOpenSSL",
-   "usb":           "pyusb",
-   "serial":        "pyserial",
-   "dateutil":      "python-dateutil",
-   "dotenv":        "python-dotenv",
-   "jose":          "python-jose",
-   "magic":         "python-magic",
-   "slugify":       "python-slugify",
-   "MySQLdb":       "mysqlclient",
-   "apt":           "python-apt",
-   "dbus":          "dbus-python",
-   "gtk":           "PyGTK",
-   "pkg_resources": "setuptools",
-   "win32api":      "pywin32",
-   "win32con":      "pywin32",
-   "win32gui":      "pywin32",
-   "pywintypes":    "pywin32",
-   "winreg":        "",            # stdlib on Windows — filtered elsewhere
-}
 
 
 def _GuessPackageName(import_name: str) -> str:

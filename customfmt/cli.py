@@ -34,6 +34,7 @@ import json
 import re
 import sys
 import textwrap
+from pathlib import Path
 
 from customfmt import __version__
 from customfmt.checker import CheckFile
@@ -49,9 +50,6 @@ from customfmt.symbols.import_scanner import ScanImports
 from customfmt.symbols.project_graph import FindRefsByName, FindRefsBySymbol
 from customfmt.symbols.resolver import ResolveFile, ResolveResultSet
 from customfmt.types import Violation
-
-from pathlib import Path
-
 
 # ---------------------------------------------------------------------------
 # Argument parser
