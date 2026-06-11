@@ -328,8 +328,9 @@ write and exits 2 when the plan contains any `warnings`, `skipped`,
 `unresolved_references`, or `dynamic_references`. Method JSON and diff plans
 also require completeness and exit 2 when dynamic references, unresolved
 references, skipped items, or warnings are present. Method `--apply` uses the
-same completeness rule and is all-or-nothing: every affected file is validated
-in memory before any file is written. Use `--apply --allow-incomplete` only
+same completeness rule and an all-or-nothing guarded write with rollback:
+every affected file is validated in memory before any file is written. Use
+`--apply --allow-incomplete` only
 when you have reviewed the JSON or diff and want to apply the safe planned
 token edits for non-method targets while leaving incomplete, skipped, or
 dynamic sites untouched. `--allow-incomplete` does not permit incomplete

@@ -1395,6 +1395,45 @@ class TestRenameSymbolApply:
       assert "method rename plan is incomplete" in err
       assert f.read_text(encoding="utf-8") == original
 
+   def TestApplyAllowIncompleteStillRefusesMonkeypatchedIncompleteMethodPlan(
+      self, tmp_path, monkeypatch
+   ):
+      original = "class Repo:\n   def Build(self):\n      return 1\n"
+      f = Write(tmp_path / "main.py", original)
+      target = ProjectDefinition(
+         Name          = "Build",
+         Kind          = "method",
+         FilePath      = str(f),
+         Line          = 2,
+         Col           = 3,
+         ScopeId       = "repo",
+         ScopeName     = "Repo",
+         Confidence    = "local_resolved",
+         QualifiedName = "Repo.Build",
+         Extra         = {"owner_class_name": "Repo"},
+      )
+      plan = RenameSymbolPlan(Query={}, Target=target, NewName="Make")
+      plan.Edits.append(RenameSymbolEdit(str(f), 2, 7, "Build", "Make", "definition:method"))
+      plan.DynamicReferences.append({
+         "reason":     "dynamic",
+         "file":       str(f),
+         "line":       10,
+         "col":        10,
+         "name":       "Build",
+         "kind":       "call",
+         "confidence": "dynamic",
+      })
+      monkeypatch.setattr("customfmt.cli.PlanRenameSymbol", lambda *args, **kwargs: (plan, []))
+
+      rc, out, err = self.RunApply(
+         f, "--name", "Build", "--to", "Make", "--allow-incomplete"
+      )
+
+      assert rc == 2
+      assert out == ""
+      assert "--allow-incomplete cannot apply method rename plans" in err
+      assert f.read_text(encoding="utf-8") == original
+
    def TestApplyUpdatesSafeNamespacePackageCase(self, tmp_path):
       ns = tmp_path / "ns"
       model = Write(ns / "models.py", "class UserModel:\n   pass\n")
@@ -1682,7 +1721,12 @@ class TestRenameSymbolApply:
       plan.Edits.append(
          RenameSymbolEdit(str(second), 1, 6, "OtherModel", "AccountModel", "definition:class")
       )
+
+      def FailIfWriteStarts(path, text):
+         raise AssertionError(f"write should not start for {path}")
+
       monkeypatch.setattr("customfmt.cli.PlanRenameSymbol", lambda *args, **kwargs: (plan, []))
+      monkeypatch.setattr("customfmt.cli.WriteUtf8Lf", FailIfWriteStarts)
 
       rc, out, err = self.RunApply(tmp_path, "--name", "UserModel", "--to", "AccountModel")
 
