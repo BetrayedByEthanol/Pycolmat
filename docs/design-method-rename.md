@@ -274,7 +274,22 @@ Diff rendering should use the same validated token edit plan that apply mode
 would use. The diff should be read-only and should make every planned token
 change visible before a user chooses apply mode.
 
-### Apply Blocked By Unresolved Or Dynamic References
+### Apply Eligibility
+
+Method apply should be enabled only for complete method plans. A method plan is
+complete only when all of the following are true:
+
+* the selected target is a supported method definition;
+* the target method has an owning class symbol;
+* the plan includes the method definition token edit;
+* every planned reference is resolved to the same owning class and method
+  target;
+* the plan has no warnings;
+* the plan has no skipped items;
+* the plan has no unresolved references;
+* the plan has no dynamic references;
+* the plan has no unsupported references or incomplete-reference markers; and
+* the plan has no collisions.
 
 Apply mode must validate all affected files before writing any file. By default,
 it must fail with exit code `2` and write nothing if the plan contains:
@@ -283,12 +298,30 @@ it must fail with exit code `2` and write nothing if the plan contains:
 * dynamic references related to the target method name;
 * unsupported inheritance or MRO patterns;
 * skipped monkey patching or dynamic attribute writes;
+* collisions with an existing method name in an affected class scope;
 * token validation failures; or
 * any warning that means the rename may be incomplete.
 
 If an override flag is ever allowed, it should follow the existing
 `--allow-incomplete` rule: apply-only, explicit, and rejected for JSON or diff
 modes.
+
+### Token Renderer Reuse
+
+Method apply can safely reuse the existing token renderer because Phase 3 method
+plans already express method definitions and references as exact token edits:
+file path, 1-indexed line, 0-indexed column, old token text, new token text,
+and edit kind. The renderer is intentionally symbol-kind agnostic. It accepts a
+plan, groups edits by file, tokenizes each original file, validates that every
+planned position is a `NAME` token with the expected old text, renders all
+affected files in memory, and raises before any caller writes if a token is
+missing or mismatched.
+
+Phase 4 should therefore reuse that renderer for method apply exactly as diff
+mode does. The method-specific work belongs in apply eligibility checks before
+rendering, not in a new method-specific renderer. This keeps method apply on the
+same guarded path as existing project-wide apply behavior and avoids unsafe text
+replacement.
 
 ## Implementation Phases
 
@@ -347,13 +380,36 @@ modes.
 
 
 
-4. Apply support
+4. Apply support (design pending approval)
 
-   - reuse token renderer
+   - enable method `--apply` only for complete method plans; a complete method
+     plan has a selected method target, an owning class, at least the definition
+     edit, and only resolved references that match that same owner class and
+     method target
 
-   - block incomplete plans by default
+   - refuse method `--apply` with exit code `2` and write nothing when the plan
+     contains any warnings, skipped items, unresolved references, dynamic
+     references, unsupported references, incomplete-reference markers, or other
+     completeness guards
 
-   - require full test coverage before enabling
+   - refuse method `--apply` with exit code `2` and write nothing when the plan
+     reports a collision or when any affected class scope would contain the new
+     method name already
+
+   - reuse the existing guarded token renderer used by non-method
+     `rename-symbol --apply` and by method `--diff`; method apply should not add
+     a second string-replacement path
+
+   - run the same token-position validation as existing apply before any write:
+     every affected file is rendered in memory first, every planned edit must
+     target a `NAME` token at the exact planned `(line, col)`, and the token text
+     must match the planned old method name
+
+   - write affected files only after every affected file has passed token
+     validation, preserving the existing all-or-nothing behavior and UTF-8 LF
+     output expectations
+
+   - require focused apply tests before enabling the behavior
 
 
 
@@ -402,6 +458,23 @@ Future implementation should add focused tests before enabling apply support.
 * rejects `--allow-incomplete` outside apply mode;
 * validates all affected files before writing any file; and
 * avoids partial writes on validation failure.
+
+### Phase 4 Method Apply Tests
+
+* safe `self.Method` apply writes both the method definition token and the
+  `self.Method()` reference token;
+* safe `cls.Method` apply writes both the method definition token and the
+  `cls.Method()` reference token;
+* safe `ClassName.Method` apply writes both the method definition token and the
+  same-file class-owned reference token;
+* safe imported `ClassName.Method` apply writes both files when the imported
+  class resolves to the selected class symbol;
+* incomplete method plans refuse apply with exit code `2` and leave all files
+  unchanged;
+* method-name collisions refuse apply with exit code `2` and leave all files
+  unchanged; and
+* token mismatches discovered by the renderer refuse apply with exit code `2`
+  and leave all files unchanged.
 
 ### CLI And Documentation Tests
 
