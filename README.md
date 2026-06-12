@@ -425,6 +425,29 @@ alias targets require `PascalCase`; module declarations require `PascalCase`
 or `UPPER_CASE`. Collision checks add safety warnings when the same scope or
 an importing file already binds the requested new name.
 
+#### `rename-symbol` troubleshooting
+
+- **Ambiguous `--name`:** If more than one supported definition has the same
+  name, `rename-symbol --name` exits 2 with `--name is ambiguous; use
+  --symbol (...)`. Rerun with the exact `PATH:LINE:COL` location shown in the
+  error, for example `customfmt rename-symbol src/ --symbol
+  src/models.py:1:0 --to AccountModel --diff`.
+- **Incomplete method plans:** Method renames are intentionally conservative.
+  A method plan must have no warnings, skipped items, unresolved references,
+  dynamic references, edit conflicts, or name collisions before JSON/diff/apply
+  can proceed. If the command reports `method rename plan is incomplete`, use
+  `customfmt refs ... --name MethodName --pretty` or an exact `--symbol` query
+  to inspect which sites were unresolved or dynamic.
+- **Dynamic method references:** `obj.Method()`, inherited or MRO-based calls,
+  `super().Method()`, unresolved imported class references, `getattr()`,
+  `globals()`, `importlib`, `eval`, `exec`, and string references are not
+  guessed and are never rewritten. Rewrite those sites manually only after
+  review, or leave the method rename out of the project-wide planner.
+- **`--allow-incomplete` and methods:** `--allow-incomplete` is apply-only for
+  non-method plans. It can apply safe class/function/declaration edits while
+  leaving incomplete sites untouched, but it does not override method
+  completeness guards and will not apply incomplete method plans.
+
 
 ---
 
