@@ -2109,3 +2109,149 @@ class TestRenameSymbolApply:
       assert rc == 2
       assert data == {}
       assert "--allow-incomplete requires --apply" in err
+
+
+class TestRenameSymbolStatementComposerPhaseOne:
+   def Apply(self, paths, old_name: str, new_name: str) -> tuple[int, str, str]:
+      out = StringIO()
+      err = StringIO()
+      with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+         rc = Main([
+            "rename-symbol", str(paths), "--name", old_name, "--to", new_name,
+            "--apply",
+         ])
+      return rc, out.getvalue(), err.getvalue()
+
+   def TestPrivateHelperFunctionDefinitionAndRecursiveCallsAreRenamed(self, tmp_path):
+      original = Src(
+         """
+         def __chainConditions(items):
+            if items:
+               return __chainConditions(items[1:])
+            return None
+
+         def Run(items):
+            return __chainConditions(items)
+         """
+      )
+      f = Write(tmp_path / "main.py", original)
+
+      rc, _, err = self.Apply(f, "__chainConditions", "__ChainConditions")
+
+      assert rc == 0
+      assert err == ""
+      text = f.read_text(encoding="utf-8")
+      assert "def __ChainConditions(items):" in text
+      assert "return __ChainConditions(items[1:])" in text
+      assert "return __ChainConditions(items)" in text
+      assert "__chainConditions" not in text
+
+   def TestImportedFunctionSymbolAndDirectCallsAreRenamed(self, tmp_path):
+      pkg = Package(tmp_path)
+      Write(pkg / "locator.py", "def findRepo(model_type):\n   return model_type\n")
+      main = Write(
+         pkg / "main.py",
+         Src(
+            """
+            from pkg.locator import findRepo
+
+            def Run(model_type):
+               return findRepo(model_type)
+            """
+         ),
+      )
+
+      rc, _, err = self.Apply(pkg, "findRepo", "FindRepo")
+
+      assert rc == 0
+      assert err == ""
+      assert "def FindRepo(model_type):" in (pkg / "locator.py").read_text(
+         encoding="utf-8")
+      text = main.read_text(encoding="utf-8")
+      assert "from pkg.locator import FindRepo" in text
+      assert "return FindRepo(model_type)" in text
+      assert "findRepo" not in text
+
+   def TestAmbiguousImportedFunctionSymbolIsRefused(self, tmp_path):
+      pkg = Package(tmp_path)
+      Write(pkg / "first.py", "def findRepo(model_type):\n   return model_type\n")
+      Write(pkg / "second.py", "def findRepo(model_type):\n   return model_type\n")
+      main = Write(
+         pkg / "main.py",
+         Src(
+            """
+            from pkg.first import findRepo
+
+            def Run(model_type):
+               return findRepo(model_type)
+            """
+         ),
+      )
+
+      rc, out, err = self.Apply(pkg, "findRepo", "FindRepo")
+
+      assert rc == 2
+      assert out == ""
+      assert "ambiguous" in err
+      assert "findRepo" in main.read_text(encoding="utf-8")
+
+   def TestDynamicAttributeAndMethodCallsAreNotRenamedForFunctionSymbol(self, tmp_path):
+      f = Write(
+         tmp_path / "main.py",
+         Src(
+            """
+            def findRepo(model_type):
+               return model_type
+
+            def Run(obj, statement_builder, repo):
+               local = findRepo(repo.tableName)
+               obj.findRepo()
+               statement_builder.where(repo.tableName)
+               return local
+            """
+         ),
+      )
+
+      rc, _, err = self.Apply(f, "findRepo", "FindRepo",)
+
+      assert rc == 2
+      assert "dynamic reference" in err
+      text = f.read_text(encoding="utf-8")
+      assert "def findRepo" in text
+      assert "local = findRepo(repo.tableName)" in text
+      assert "obj.findRepo()" in text
+      assert "statement_builder.where(repo.tableName)" in text
+
+   def TestStatementComposerFunctionImportBucketOnly(self, tmp_path):
+      source = Path("tests/fixtures/rename/statementComposer.input.txt")
+      target = Write(
+         tmp_path / "statementComposer.py",
+         source.read_text(encoding="utf-8"),
+      )
+      locator = tmp_path / "repos" / "Util" / "repositoryLocator.py"
+      Write(locator, "def findRepo(model_type):\n   return model_type\n")
+
+      renames = [
+         ("composeStatement", "ComposeStatement"),
+         ("__buildConditions", "__BuildConditions"),
+         ("__chainConditions", "__ChainConditions"),
+         ("__addSelectsFromTargetTable", "__AddSelectsFromTargetTable"),
+         ("__addJoinedTables", "__AddJoinedTables"),
+         ("findRepo", "FindRepo"),
+      ]
+      for old_name, new_name in renames:
+         rc, _, err = self.Apply(tmp_path, old_name, new_name)
+         assert rc == 0, err
+
+      text = target.read_text(encoding="utf-8")
+      for old_name, new_name in renames:
+         assert old_name not in text
+         assert new_name in text
+      assert "from repos.Util.repositoryLocator import FindRepo" in text
+      assert "targetRepo = FindRepo" in text
+      assert "statementBuilder.fromTable(repo.tableName)" in text
+      assert "statementBuilder.where(" in text
+      assert "statementBuilder.include(" in text
+      assert "repo.tableName" in text
+      assert "repo.pk" in text
+      assert "previousCondition.nextCondition" in text

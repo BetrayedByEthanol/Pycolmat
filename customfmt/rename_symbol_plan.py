@@ -224,8 +224,11 @@ def _ValidateNewName(target: ProjectDefinition, new_name: str) -> None:
       if not _IsPascalCase(new_name):
          raise ValueError("NewName must be PascalCase for this target")
    elif target.Kind == DefKind.FunctionDef.value:
-      if not _IsPascalCase(new_name):
-         raise ValueError("NewName must be PascalCase for function targets")
+      if not _IsFunctionPascalCase(new_name):
+         raise ValueError(
+            "NewName must be PascalCase for function targets, with optional "
+            "leading underscores for private helpers"
+         )
    elif target.Kind == DefKind.MethodDef.value:
       if not _IsPascalCase(new_name):
          raise ValueError("NewName must be PascalCase for method targets")
@@ -477,6 +480,11 @@ def _SkippedDefinition(defn: ProjectDefinition, reason: str) -> dict:
 
 def _IsPascalCase(name: str) -> bool:
    return bool(name) and name[0].isupper() and "_" not in name
+
+
+def _IsFunctionPascalCase(name: str) -> bool:
+   public_name = name.lstrip("_")
+   return _IsPascalCase(public_name)
 
 
 def _SamePath(left: str, right: str) -> bool:

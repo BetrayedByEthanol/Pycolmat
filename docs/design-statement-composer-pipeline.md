@@ -21,7 +21,8 @@ change. It intentionally proposes no formatter or resolver behavior changes.
   `statement_builder.where`, `statement_builder.select`, or
   `statement_builder.orderBy`.
 * Project-wide symbol rename must be used for real function and imported symbol
-  changes, including definitions, imports, and safely resolved references.
+  changes, including definitions, imports, and safely resolved references. This
+  function/import-symbol bucket is implemented for Phase 1.
 * Attribute/API casing requires a separate conservative design because attribute
   access is dynamic in Python and may refer to object state, properties,
   descriptors, external APIs, generated model fields, or duck-typed objects.
@@ -36,6 +37,8 @@ manual API decisions, not by one broad local pass:
 2. Run `customfmt rename-symbol` for project symbols that have definitions and
    safely resolved imports/references, such as `composeStatement` to
    `ComposeStatement`, private helper functions, and `findRepo` to `FindRepo`.
+   This Phase 1 bucket is implemented; method, attribute, and API casing buckets
+   remain future/manual work.
 3. Use future method/attribute rename support only for proven API owners where
    receiver types and declarations can be resolved conservatively.
 4. Use manual/API migration for model fields, third-party or framework-reflected
@@ -103,9 +106,11 @@ rewriting.
 
 `customfmt rename-symbol` owns real project symbols: top-level function
 renames, private helper function renames, and imported symbol renames where
-project refs can prove the target and references. It should handle the
-`composeStatement` and private helper definition/call changes, and the
-`findRepo` import/call migration, through guarded token plans.
+project refs can prove the target and references. Phase 1 implements this bucket
+for `composeStatement`, private helper definition/call changes, and the
+`findRepo` import/call migration through guarded token plans. It still does not
+own method-call casing, arbitrary object attribute casing, model/property field
+casing, or typo/API migrations.
 
 ### Future method/attribute rename support
 
