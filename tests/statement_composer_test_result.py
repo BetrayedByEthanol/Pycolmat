@@ -1,3 +1,4 @@
+FormattedFixture = r"""
 import copy
 import typing
 from collections.abc import Sequence
@@ -202,3 +203,4 @@ def __AddJoinedTables(statement_builder, repo, tables):
       statement_builder.Select(selects)
       selects.clear()
    return reference_mapping
+"""
