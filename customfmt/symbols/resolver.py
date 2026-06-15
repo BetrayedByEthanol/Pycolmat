@@ -298,6 +298,11 @@ class _Resolver(ast.NodeVisitor):
                self._RecordWriteTarget(elt, normal_kind)
          case ast.Starred(value=v):
             self._RecordWriteTarget(v, normal_kind)
+         case ast.Subscript(value=value, slice=slice_node):
+            self._WalkExprForRefs(value)
+            self._WalkExprForRefs(slice_node)
+         case ast.Attribute(value=value):
+            self._WalkExprForRefs(value)
          case _:
             pass
 
@@ -615,7 +620,6 @@ class _Resolver(ast.NodeVisitor):
                dynamic=safe_extra is None and not is_class_candidate,
                extra=attr_extra,
             )
-            self._CallSites.add((ln, co))
          case ast.Attribute(attr=attr, lineno=ln, col_offset=co):
             full = ast.unparse(node.func)
             attr_extra = {"full": full}
@@ -623,7 +627,6 @@ class _Resolver(ast.NodeVisitor):
                attr, RefKind.AttrCall, ln, co,
                dynamic=True, extra=attr_extra,
             )
-            self._CallSites.add((ln, co))
          case _:
             pass
 
