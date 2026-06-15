@@ -55,11 +55,14 @@ TestCLIFixAndCheckCrlf – Fix 4: CRLF tests for fix/check
 
 from __future__ import annotations
 
+import ast
 import textwrap
 from pathlib import Path
 
 from customfmt.cli import Main
+from customfmt.rename_plan import PlanFile
 from customfmt.renamer import AnalyseFile, _ToSnake
+from customfmt.symbols.model import FileError
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -388,6 +391,324 @@ class TestAnalyseFile:
       # So rename should proceed.
       assert result.Changed
       assert "total_count" in result.rewritten
+
+   def TestStatementComposerLikePartialRenameRegression(self, tmp_path):
+      src = Src("""\
+         def ComposeStatement(repo, includes, conditions, references):
+            statementBuilder = StatementBuilder()
+            statementBuilder.fromTable(repo.tableName)
+            includesRepos = []
+            sourceTables = set()
+            sourceTables.add(repo.tableName)
+            referenceMapping = {}
+            previousCondition = None
+            isPrimaryKeyInModelFields = False
+
+            if includes:
+               includesRepos.extend(map(lambda item: item[0], includes))
+
+            if conditions:
+               for condition_group in conditions:
+                  if previousCondition is not None and condition_group.nextCondition:
+                     statementBuilder.where(previousCondition.nextCondition)
+                  for condition in condition_group.conditions:
+                     targetRepo = findRepo(condition.modelType)
+                     tableReference = targetRepo.tableName
+                     tableTuple = (repo.tableName, tableReference)
+                     referenceMapping[tableTuple] = []
+                     sourceTables.add(tableReference)
+                     if condition.isPrimary:
+                        isPrimaryKeyInModelFields = True
+                        includesRepos.extend(condition.includes)
+                     if tableTuple in references:
+                        statementBuilder.include(
+                           tableTuple[0],
+                           tableTuple[1],
+                           references[tableTuple][0],
+                           references[tableTuple][1],
+                        )
+                     elif targetRepo.tableName in sourceTables:
+                        statementBuilder.includeOptional(
+                           tableReference,
+                           targetRepo.tableName,
+                           referenceMapping[tableTuple],
+                        )
+                     statementBuilder.orderBy(referenceMapping[tableTuple])
+                     previousCondition = condition
+
+            return (
+               statementBuilder.getKWArgs(),
+               includesRepos,
+               sourceTables,
+               referenceMapping,
+               previousCondition,
+               isPrimaryKeyInModelFields,
+            )
+      """)
+      f = Write(tmp_path / "statement_composer.py", src)
+
+      assert RunMain("rename", "--check", str(f)) == 1
+      assert RunMain("rename", "--apply", str(f)) == 0
+
+      content = f.read_text(encoding="utf-8")
+      ast.parse(content)
+      body = content[content.index("def ComposeStatement"):]
+
+      for old_name in (
+         "statementBuilder",
+         "includesRepos",
+         "sourceTables",
+         "referenceMapping",
+         "tableTuple",
+         "tableReference",
+         "previousCondition",
+         "targetRepo",
+         "isPrimaryKeyInModelFields",
+      ):
+         assert old_name not in body
+
+      for new_name in (
+         "statement_builder",
+         "includes_repos",
+         "source_tables",
+         "reference_mapping",
+         "table_tuple",
+         "table_reference",
+         "previous_condition",
+         "target_repo",
+         "is_primary_key_in_model_fields",
+      ):
+         assert new_name in body
+
+      assert "target_repo.tableName" in body
+      assert "condition_group.nextCondition" in body
+      assert "def ComposeStatement" in body
+
+   def TestPartialRenameMethodCallAndContainerReferencesRegression(self, tmp_path):
+      src = Src("""\
+         def ComposeOne(repo, conditions):
+            statementBuilder = StatementBuilder()
+            includesRepos = []
+            sourceTables = set()
+            referenceMapping = {}
+            tableTuple = (repo.tableName, repo.alias)
+            tableReference = repo.tableName
+            referenceMapping[tableTuple] = tableReference
+            for condition in conditions:
+               statementBuilder.fromTable(repo.tableName)
+               statementBuilder.orderBy(referenceMapping[tableTuple])
+               includesRepos.extend(condition.includes)
+               sourceTables.add(tableReference)
+            return statementBuilder
+      """)
+      f = Write(tmp_path / "statement_composer.py", src)
+
+      plan = PlanFile(f)
+      assert not isinstance(plan, FileError)
+      rewritten = plan.Rewritten
+      ast.parse(rewritten)
+
+      assert "statement_builder = StatementBuilder()" in rewritten
+      assert "statement_builder.fromTable(repo.tableName)" in rewritten
+      assert "statement_builder.orderBy(reference_mapping[table_tuple])" in rewritten
+      assert "includes_repos.extend(condition.includes)" in rewritten
+      assert "source_tables.add(table_reference)" in rewritten
+      assert "reference_mapping[table_tuple] = table_reference" in rewritten
+
+      for old_name in (
+         "statementBuilder",
+         "includesRepos",
+         "sourceTables",
+         "referenceMapping",
+         "tableTuple",
+         "tableReference",
+      ):
+         assert old_name not in rewritten
+
+
+   def TestRealStatementComposerMultiFunctionRegression(self, tmp_path):
+      src = Src("""\
+         def ComposeStatement(repo, includes, conditions, references):
+            statementBuilder = StatementBuilder()
+            statementBuilder.fromTable(repo.tableName)
+            __addSelectsFromTargetTable(statementBuilder, repo)
+            includesRepos = []
+            if includes:
+               refs = __addJoinedTables(statementBuilder, repo, includes)
+               references.update(refs)
+               includesRepos.extend(map(lambda item: item[0], includes))
+            if conditions:
+               __buildConditions(statementBuilder, repo, conditions)
+            statementBuilder.orderBy([str(repo.pk)])
+            temp = {}
+            for tableReference in references:
+               ref1 = None
+               ref2 = None
+               for rep in chain([type(repo)], includesRepos):
+                  if tableReference[0] == rep.tableName:
+                     ref1 = rep
+                  if tableReference[1] == rep.tableName:
+                     ref2 = rep
+               temp[(ref1, ref2)] = {}
+            references.clear()
+            references.update(temp)
+            return statementBuilder.getKWArgs()
+
+         def __buildConditions(statement_builder, repo, conditions):
+            if isinstance(conditions, ConditionalStatement):
+               conditions = [conditions]
+            if len(conditions) > 0 and isinstance(conditions[0], tuple):
+               statement_builder.openBracket()
+               targetRepo = findRepo(conditions[0][0].modelType)
+               statement_builder.where(
+                  targetRepo.tableName,
+                  conditions[0][0].fieldName,
+                  conditions[0][0].operation.value,
+                  conditions[0][0].condition,
+               )
+               __chainConditions(statement_builder, repo, conditions[0])
+               statement_builder.closeBracket()
+            elif len(conditions) > 0 and isinstance(conditions[0], ConditionalStatement):
+               targetRepo = findRepo(conditions[0].modelType)
+               statement_builder.where(
+                  targetRepo.tableName,
+                  conditions[0].fieldName,
+                  conditions[0].operation.value,
+                  conditions[0].condition,
+               )
+               __chainConditions(statement_builder, repo, conditions)
+
+         def __chainConditions(statement_builder, repo, conditions):
+            i = 1
+            while i < len(conditions):
+               previousCondition = conditions[i - 1]
+               while isinstance(previousCondition, list) or isinstance(previousCondition, tuple):
+                  previousCondition = previousCondition[-1]
+               if previousCondition.nextCondition is None:
+                  break
+               if previousCondition.nextCondition == ChainCondition.AND:
+                  statement_builder.andWhere()
+               else:
+                  statement_builder.orWhere()
+               if isinstance(conditions[i], list) or isinstance(conditions[i], tuple):
+                  statement_builder.openBracket()
+                  targetRepo = findRepo(conditions[i][0].modelType)
+                  statement_builder.where(
+                     targetRepo.tableName,
+                     conditions[i][0].fieldName,
+                     conditions[i][0].operation.value,
+                     conditions[i][0].condition,
+                  )
+                  __chainConditions(statement_builder, repo, conditions[i])
+                  statement_builder.closeBracket()
+               else:
+                  targetRepo = findRepo(conditions[i].modelType)
+                  statement_builder.where(
+                     targetRepo.tableName,
+                     conditions[i].fieldName,
+                     conditions[i].operation.value,
+                     conditions[i].condition,
+                  )
+               i += 1
+
+         def __addSelectsFromTargetTable(statement_builder, repo):
+            selects = []
+            isPrimaryKeyInModelFields = False
+            for column in repo.model.__fields__:
+               if column != "frozen":
+                  selects.append(column)
+                  if column == repo.pk:
+                     isPrimaryKeyInModelFields = True
+            if not isPrimaryKeyInModelFields:
+               selects.append(repo.pk)
+            statement_builder.select(selects)
+
+         def __addJoinedTables(statement_builder, repo, tables):
+            selects = []
+            referenceMapping = {}
+            references = copy.deepcopy(repo.references)
+            sourceTables = set()
+            sourceTables.add(repo.tableName)
+            for inc, isInnerJoin in tables:
+               tableTuple = (None, None)
+               if inc.references:
+                  references |= inc.references
+               for ref in references:
+                  if inc.tableName == ref[1] and ref[0] in sourceTables:
+                     tableTuple = ref
+                     sourceTables.add(inc.tableName)
+                     break
+                  elif inc.tableName == ref[0] and ref[1] in sourceTables:
+                     tableTuple = (ref[1], ref[0])
+                     keyRef = references[ref]
+                     references[tableTuple] = (keyRef[1], keyRef[0])
+                     sourceTables.add(inc.tableName)
+                     break
+               if isInnerJoin:
+                  statement_builder.include(
+                     tableTuple[0],
+                     tableTuple[1],
+                     references[tableTuple][0],
+                     references[tableTuple][1],
+                  )
+               else:
+                  statement_builder.includeOptional(
+                     tableTuple[0],
+                     tableTuple[1],
+                     references[tableTuple][0],
+                     references[tableTuple][1],
+                  )
+               referenceMapping[tableTuple] = []
+               isPrimaryKeyInModelFields = False
+               for column in inc.model.__fields__.keys():
+                  selects.append(column)
+                  if column == inc.pk:
+                     isPrimaryKeyInModelFields = True
+               if not isPrimaryKeyInModelFields:
+                  selects.append(inc.pk)
+               statement_builder.select(selects)
+               selects.clear()
+            return referenceMapping
+      """)
+      f = Write(tmp_path / "statement_composer.py", src)
+
+      assert RunMain("rename", "--apply", str(f)) == 0
+
+      content = f.read_text(encoding="utf-8")
+      ast.parse(content)
+
+      for old_name in (
+         "statementBuilder",
+         "includesRepos",
+         "tableReference",
+         "targetRepo",
+         "previousCondition",
+         "isPrimaryKeyInModelFields",
+         "referenceMapping",
+         "sourceTables",
+         "tableTuple",
+         "keyRef",
+         "isInnerJoin",
+      ):
+         assert old_name not in content
+
+      for new_name in (
+         "statement_builder",
+         "includes_repos",
+         "table_reference",
+         "target_repo",
+         "previous_condition",
+         "is_primary_key_in_model_fields",
+         "reference_mapping",
+         "source_tables",
+         "table_tuple",
+         "key_ref",
+         "is_inner_join",
+      ):
+         assert new_name in content
+
+      assert "references[table_tuple] = (key_ref[1], key_ref[0])" in content
+
 
 
 # ---------------------------------------------------------------------------
