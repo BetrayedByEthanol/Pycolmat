@@ -719,8 +719,10 @@ class TestAnalyseFile:
    @pytest.mark.xfail(
       reason=(
          "Golden coverage for the intended statementComposer pipeline; current "
-         "local rename only covers local variables and does not yet perform the "
-         "project-style function/helper/API casing captured by the fixture."
+         "local rename only covers local-variable-style casing. The remaining "
+         "function/import/method/attribute/API migrations are documented in "
+         "docs/design-statement-composer-pipeline.md and must stay out of the "
+         "local rename planner until each bucket has a conservative owner."
       ),
       strict=True,
    )
