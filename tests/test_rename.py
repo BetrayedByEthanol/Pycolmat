@@ -724,9 +724,9 @@ class TestAnalyseFile:
       ),
       strict=True,
    )
-   def TestStatementComposerGoldenFixturePipeline(self, tmp_path):
-      source = FixturePath("rename", "statementComposer.input.py")
-      expected = FixturePath("rename", "statementComposer.expected.py").read_text(
+   def TestStatementComposerFutureGoldenFixturePipeline(self, tmp_path):
+      source = FixturePath("rename", "statementComposer.input.txt")
+      expected = FixturePath("rename", "statementComposer.expected.txt").read_text(
          encoding="utf-8")
       target = tmp_path / "statementComposer.py"
       shutil.copyfile(source, target)
