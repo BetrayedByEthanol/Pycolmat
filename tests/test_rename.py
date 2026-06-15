@@ -56,8 +56,11 @@ TestCLIFixAndCheckCrlf – Fix 4: CRLF tests for fix/check
 from __future__ import annotations
 
 import ast
+import shutil
 import textwrap
 from pathlib import Path
+
+import pytest
 
 from customfmt.cli import Main
 from customfmt.rename_plan import PlanFile
@@ -85,6 +88,10 @@ def WriteBytes(path: Path, data: bytes) -> Path:
 
 def RunMain(*args: str) -> int:
    return Main(list(args))
+
+
+def FixturePath(*parts: str) -> Path:
+   return Path(__file__).parent / "fixtures" / Path(*parts)
 
 
 # ---------------------------------------------------------------------------
@@ -708,6 +715,44 @@ class TestAnalyseFile:
          assert new_name in content
 
       assert "references[table_tuple] = (key_ref[1], key_ref[0])" in content
+
+   @pytest.mark.xfail(
+      reason=(
+         "Golden coverage for the intended statementComposer pipeline; current "
+         "local rename only covers local variables and does not yet perform the "
+         "project-style function/helper/API casing captured by the fixture."
+      ),
+      strict=True,
+   )
+   def TestStatementComposerFutureGoldenFixturePipeline(self, tmp_path):
+      source = FixturePath("rename", "statementComposer.input.txt")
+      expected = FixturePath("rename", "statementComposer.expected.txt").read_text(
+         encoding="utf-8")
+      target = tmp_path / "statementComposer.py"
+      shutil.copyfile(source, target)
+
+      assert RunMain("rename", "--apply", str(target)) == 0
+
+      result = target.read_text(encoding="utf-8")
+      ast.parse(result)
+      assert result == expected
+
+      for old_name in (
+         "statementBuilder",
+         "includesRepos",
+         "tableReference",
+         "targetRepo",
+         "previousCondition",
+         "isPrimaryKeyInModelFields",
+         "referenceMapping",
+         "sourceTables",
+         "tableTuple",
+         "keyRef",
+         "isInnerJoin",
+         "composeStatement",
+         "findRepo",
+      ):
+         assert old_name not in result
 
 
 
