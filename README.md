@@ -437,7 +437,9 @@ an importing file already binds the requested new name.
   dynamic references, edit conflicts, or name collisions before JSON/diff/apply
   can proceed. If the command reports `method rename plan is incomplete`, use
   `customfmt refs ... --name MethodName --pretty` or an exact `--symbol` query
-  to inspect which sites were unresolved or dynamic.
+  to inspect which sites were unresolved or dynamic. The planner suggests this
+  inspection step in the user-facing error instead of broadening method rename
+  support.
 - **Dynamic method references:** `obj.Method()`, inherited or MRO-based calls,
   `super().Method()`, unresolved imported class references, `getattr()`,
   `globals()`, `importlib`, `eval`, `exec`, and string references are not

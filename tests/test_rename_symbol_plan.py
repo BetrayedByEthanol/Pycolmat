@@ -433,6 +433,7 @@ class TestRenameSymbolPlan:
       assert data == {}
       assert "method rename plan is incomplete" in err
       assert "dynamic reference" in err
+      assert "customfmt refs --name" in err
 
    def TestMethodRenameCollisionWithSameClassMethodIsRejected(self, tmp_path):
       f = Write(
@@ -1325,6 +1326,7 @@ class TestRenameSymbolApply:
       assert out == ""
       assert "dynamic reference" in err
       assert "--allow-incomplete cannot apply incomplete method plans" in err
+      assert "customfmt refs --name" in err
       assert f.read_text(encoding="utf-8") == original
 
    def TestApplyAmbiguousImportedMethodRefusesAndWritesNothing(self, tmp_path):
@@ -1433,6 +1435,7 @@ class TestRenameSymbolApply:
       assert rc == 2
       assert out == ""
       assert "--allow-incomplete cannot apply method rename plans" in err
+      assert "customfmt refs --name" in err
       assert f.read_text(encoding="utf-8") == original
 
    def TestApplyUpdatesSafeNamespacePackageCase(self, tmp_path):

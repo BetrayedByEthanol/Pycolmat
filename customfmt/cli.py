@@ -793,7 +793,9 @@ def _FormatIncompleteMethodApplyError(plan) -> str | None:
    summary = ", ".join(parts)
    return (
       "customfmt: error: rename-symbol --apply refused incomplete method plan "
-      f"({summary}); --allow-incomplete cannot apply method rename plans"
+      f"({summary}); --allow-incomplete cannot apply method rename plans; inspect the "
+      "reported references with customfmt refs --name or rerun with an exact --symbol "
+      "query before attempting a manual method rename"
    )
 
 
