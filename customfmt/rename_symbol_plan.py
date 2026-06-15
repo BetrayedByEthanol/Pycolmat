@@ -377,7 +377,9 @@ def _FormatIncompleteMethodPlanError(plan: RenameSymbolPlan) -> str:
    return (
       f"method rename plan is incomplete ({summary}); "
       "method renames require every reference to be safely resolved, and "
-      "--allow-incomplete cannot apply incomplete method plans"
+      "--allow-incomplete cannot apply incomplete method plans; inspect the "
+      "reported references with customfmt refs --name or rerun with an exact "
+      "--symbol query before attempting a manual method rename"
    )
 
 
