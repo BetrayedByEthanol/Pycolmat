@@ -1,16 +1,25 @@
 # Changelog
 
-## Unreleased
+## v0.2.0 - 2026-06-15
 
-- Added namespace package support for project refs in conservatively resolved, unambiguous scanned roots.
-- Added namespace package support for `rename-symbol` diff/apply when scanned roots make the import target unambiguous.
-- Added the public `InspectProjectModules` module inspection API.
-- Added `rename-symbol` JSON planning for safe `MethodDef` targets, including direct method definitions and safely resolved method references.
-- Added read-only `rename-symbol --diff` support for safe method rename plans.
-- Added guarded `rename-symbol --apply` support for complete method rename plans.
-- Documented that method rename-symbol JSON, diff, and apply modes are supported only for complete safe plans.
-- Blocked incomplete method rename plans when dynamic, inherited, `super()`, arbitrary `obj.Method()`, `getattr()`, string, unresolved, skipped, warning, edit-conflict, or method-name collision cases are present; `--allow-incomplete` does not override method apply guards.
-- Added `customfmt doctor` diagnostics for namespace package ambiguity.
+This release expands `customfmt rename-symbol` with conservative method rename support.
+
+### Added
+- Safe method reference resolution for:
+  - `self.Method()`
+  - `cls.Method()`
+  - same-file `ClassName.Method(...)`
+  - safely imported `ClassName.Method(...)`
+- JSON and diff planning for safe method renames.
+- Guarded method `--apply` for complete safe method plans.
+- Namespace-package support for project refs and rename-symbol.
+- `customfmt doctor` readiness diagnostics.
+- Public `InspectProjectModules(paths)` inspection API.
+
+### Safety
+- Method apply is all-or-nothing with validation before writing.
+- `--allow-incomplete` does not bypass method safety guards.
+- Dynamic, inherited, `super()`, arbitrary `obj.Method()`, `getattr()`, string, unresolved, skipped, warning, edit-conflict, and collision cases remain blocked.
 
 ## v0.1.0 - 2026-06-05
 
