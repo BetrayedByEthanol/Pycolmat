@@ -1,10 +1,10 @@
 import copy
 import typing
+from collections.abc import Sequence
 from datetime import datetime
 from decimal import Decimal
 from enum import Enum
 from itertools import chain
-from typing import Sequence
 
 from dataAccess.statementBuilder import StatementBuilder
 from repos.baseRepo import BaseRepo
