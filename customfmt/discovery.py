@@ -22,6 +22,7 @@ IGNORED_DIRS: frozenset[str] = frozenset(
       ".pytest_cache",
       "build",
       "dist",
+      "fixtures",
    }
 )
 
