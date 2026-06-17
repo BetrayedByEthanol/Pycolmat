@@ -399,6 +399,90 @@ class TestAnalyseFile:
       assert result.Changed
       assert "total_count" in result.rewritten
 
+
+   def TestPrivateHelperParameterRenamed(self, tmp_path):
+      src = Src("""\
+         def __Build(statementBuilder):
+            return statementBuilder
+      """)
+      f = Write(tmp_path / "f.py", src)
+      plan = PlanFile(f)
+      assert not isinstance(plan, FileError)
+      assert plan.Changed
+      assert "def __Build(statement_builder):" in plan.Rewritten
+      assert "return statement_builder" in plan.Rewritten
+
+   def TestPrivateHelperParameterMultipleReferencesRenamed(self, tmp_path):
+      src = Src("""\
+         def __Build(statementBuilder):
+            statementBuilder.where()
+            return statementBuilder
+      """)
+      f = Write(tmp_path / "f.py", src)
+      plan = PlanFile(f)
+      assert not isinstance(plan, FileError)
+      assert plan.Rewritten.count("statement_builder") == 3
+      assert "statementBuilder" not in plan.Rewritten
+
+   def TestPublicFunctionParameterNotRenamedByDefault(self, tmp_path):
+      src = Src("""\
+         def ComposeStatement(statementBuilder):
+            return statementBuilder
+      """)
+      f = Write(tmp_path / "f.py", src)
+      plan = PlanFile(f)
+      assert not isinstance(plan, FileError)
+      assert not plan.Changed
+      assert plan.Rewritten == src
+
+   def TestDecoratedFunctionParameterNotRenamed(self, tmp_path):
+      src = Src("""\
+         @decorator
+         def __Build(statementBuilder):
+            return statementBuilder
+      """)
+      f = Write(tmp_path / "f.py", src)
+      plan = PlanFile(f)
+      assert not isinstance(plan, FileError)
+      assert not plan.Changed
+      assert plan.Rewritten == src
+
+   def TestMethodParameterNotRenamedByDefault(self, tmp_path):
+      src = Src("""\
+         class Repo:
+            def Build(self, statementBuilder):
+               return statementBuilder
+      """)
+      f = Write(tmp_path / "f.py", src)
+      plan = PlanFile(f)
+      assert not isinstance(plan, FileError)
+      assert not plan.Changed
+      assert plan.Rewritten == src
+
+   def TestKeywordCallRiskBlocksParameterRename(self, tmp_path):
+      src = Src("""\
+         def __Build(statementBuilder):
+            return statementBuilder
+
+         __Build(statementBuilder=value)
+      """)
+      f = Write(tmp_path / "f.py", src)
+      plan = PlanFile(f)
+      assert not isinstance(plan, FileError)
+      assert not plan.Changed
+      assert "parameter appears in keyword-call syntax" in {s.Reason for s in plan.Skipped}
+
+   def TestParameterReceiverRenamedButAttributeUnchanged(self, tmp_path):
+      src = Src("""\
+         def __Build(statementBuilder):
+            statementBuilder.where()
+      """)
+      f = Write(tmp_path / "f.py", src)
+      plan = PlanFile(f)
+      assert not isinstance(plan, FileError)
+      assert "statement_builder.where()" in plan.Rewritten
+      assert ".Where" not in plan.Rewritten
+
    def TestStatementComposerLikePartialRenameRegression(self, tmp_path):
       src = Src("""\
          def ComposeStatement(repo, includes, conditions, references):
@@ -715,6 +799,53 @@ class TestAnalyseFile:
          assert new_name in content
 
       assert "references[table_tuple] = (key_ref[1], key_ref[0])" in content
+
+
+   def TestStatementComposerPhase2PrivateHelperParameters(self, tmp_path):
+      source = FixturePath("rename", "statementComposer.input.txt")
+      target = tmp_path / "statementComposer.py"
+      shutil.copyfile(source, target)
+
+      for old_name, new_name in (
+         ("composeStatement", "ComposeStatement"),
+         ("__buildConditions", "__BuildConditions"),
+         ("__chainConditions", "__ChainConditions"),
+         ("__addSelectsFromTargetTable", "__AddSelectsFromTargetTable"),
+         ("__addJoinedTables", "__AddJoinedTables"),
+      ):
+         assert RunMain(
+            "rename-symbol", str(target),
+            "--name", old_name, "--to", new_name, "--apply",
+         ) == 0
+
+      assert RunMain("rename", "--apply", str(target)) == 0
+      result = target.read_text(encoding="utf-8")
+      ast.parse(result)
+
+      assert "def __BuildConditions(" in result
+      assert "statement_builder," in result
+      assert "def __ChainConditions(statement_builder, repo, conditions):" in result
+      assert "def __AddSelectsFromTargetTable(statement_builder, repo):" in result
+      assert "def __AddJoinedTables(statement_builder, repo, tables):" in result
+      for new_name in (
+         "statement_builder",
+         "includes_repos",
+         "source_tables",
+         "reference_mapping",
+         "table_tuple",
+         "table_reference",
+         "previous_condition",
+         "target_repo",
+         "is_primary_key_in_model_fields",
+      ):
+         assert new_name in result
+
+      assert "statement_builder.fromTable" in result
+      assert "statement_builder.where" in result
+      assert "statement_builder.include" in result
+      assert "repo.tableName" in result
+      assert "repo.pk" in result
+      assert "previous_condition.nextCondition" in result
 
    @pytest.mark.xfail(
       reason=(
