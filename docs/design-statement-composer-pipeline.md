@@ -32,8 +32,8 @@ change. It intentionally proposes no formatter or resolver behavior changes.
 The fixture should eventually be reached by composing multiple guarded tools and
 manual API decisions, not by one broad local pass:
 
-1. Run `customfmt rename` for local variable and, if explicitly implemented as a
-   separate conservative extension, parameter casing inside function scopes.
+1. Run `customfmt rename` for local variables and the implemented Phase 2
+   private-helper parameter casing inside safe function scopes.
 2. Run `customfmt rename-symbol` for project symbols that have definitions and
    safely resolved imports/references, such as `composeStatement` to
    `ComposeStatement`, private helper functions, and `findRepo` to `FindRepo`.
@@ -49,7 +49,7 @@ manual API decisions, not by one broad local pass:
 
 | Transformation | Examples in fixture | Bucket | Owning tool/process |
 | --- | --- | --- | --- |
-| `statementBuilder` -> `statement_builder` | local assignment, argument passed to helpers, all reads in helper scopes | local variable rename / parameter rename | `customfmt rename` for the local variable; parameter support only if added as a conservative local-scope feature |
+| `statementBuilder` -> `statement_builder` | local assignment, argument passed to helpers, all reads in helper scopes | local variable rename / parameter rename | `customfmt rename` for the local variable and Phase 2 private-helper parameter support |
 | `includesRepos` -> `includes_repos` | accumulator list in `ComposeStatement` | local variable rename | `customfmt rename` |
 | `tableReference` -> `table_reference` | loop target and reads | local variable rename | `customfmt rename` |
 | `targetRepo` -> `target_repo` | local results from repository lookup | local variable rename | `customfmt rename` |
@@ -117,12 +117,17 @@ single function or method scope. In this fixture that includes local assignments
 loop targets, and local reads such as `tableTuple`, `keyRef`, and
 `isPrimaryKeyInModelFields`.
 
-Parameter casing is listed separately because parameters can be API surface. If
-`statementBuilder` parameters are renamed to `statement_builder`, that should be
-an explicit conservative extension with tests for call compatibility, keyword
-arguments, decorators, overrides, and public API boundaries. It must still remain
-local-scope token rewriting and must not become attribute or project-symbol
-rewriting.
+Phase 2 implements a narrow parameter-casing extension for private helper
+functions only. `customfmt rename` may rename direct parameters such as
+`statementBuilder` to `statement_builder` only when the owning function name is
+private/internal (`_` or `__` prefix), is not a method, has no decorators, uses
+only ordinary parameters, and the old name does not appear in keyword-call
+syntax in the analyzed file. The edit remains local-scope token rewriting: it
+updates the parameter token and resolved local reads/writes in that function,
+including receiver-name uses such as `statement_builder.where`, but it does not
+rename the called attribute `where`. Public parameter rename, method parameter
+rename, method-call casing, attribute casing, model/property casing, and typo/API
+correction remain future/manual work.
 
 ### `customfmt rename-symbol`
 
@@ -159,8 +164,9 @@ framework-reflected, generated, serialized, or used dynamically.
 
 `TestStatementComposerFutureGoldenFixturePipeline` must remain `xfail(strict=True)`
 while the pipeline is incomplete. The current `customfmt rename --apply` result
-is expected to cover only local-variable-style casing and therefore should not
-match the golden fixture, which also includes project symbol renames,
+is expected to cover only local-variable-style casing plus Phase 2 private-helper
+parameter casing and therefore should not match the golden fixture, which also
+includes project symbol renames,
 import-binding renames, method-call casing, object attribute casing,
 model/property casing, and the `closeBreacket` typo/API correction.
 

@@ -9,10 +9,10 @@ The planner uses ResolveFile() to obtain per-scope definitions and
 references, applies all safety checks, then computes a token-level
 patch map.  It does NOT rewrite files; that is left to the CLI.
 
-Scope for v1
-------------
-- Only DefKind.LocalWrite definitions inside FunctionDef / AsyncFunctionDef
-  scopes.
+Scope
+-----
+- DefKind.LocalWrite definitions inside FunctionDef / AsyncFunctionDef scopes.
+- Safe DefKind.Parameter definitions for private helper functions only.
 - Rename non-snake_case names to snake_case.
 - Rename ALL read/write references resolved to the same local definition.
 - Covers Assign, AnnAssign, AugAssign, For, With-as, ExceptHandler-as
@@ -27,6 +27,9 @@ Function scope is skipped entirely if:
 Individual rename is skipped if:
   - proposed snake_case name collides with any visible local, parameter,
     import, parent/module declaration, or builtin name
+  - parameter belongs to a public function, method, decorated function, or
+    complex signature
+  - parameter old name appears in keyword-call syntax in the analyzed file
   - two different bad names map to the same snake_case target
   - another rename wants to patch the same token to a different name
 
@@ -41,6 +44,7 @@ string literals and comments are never touched.
 
 from __future__ import annotations
 
+import ast
 import builtins
 import difflib
 import io
@@ -137,8 +141,76 @@ class RenameItem:
          self.DefLine,
          self.AllSites[0].Col + 1 if self.AllSites else 1,
          "RENAME",
-         f"local variable {self.OldName!r} -> {self.NewName!r}",
+         f"local name {self.OldName!r} -> {self.NewName!r}",
       )
+
+
+
+
+@dataclass
+class _FunctionSafety:
+   """AST-derived safety metadata for one function scope."""
+
+   IsMethod        : bool
+   HasDecorators   : bool
+   HasUnsafeArgs   : bool
+   KeywordArgNames : set[str]
+
+
+def _BuildFunctionSafetyMap(source: str) -> dict[tuple[str, int], _FunctionSafety]:
+   """Return function safety metadata keyed by (qualified name, line)."""
+   try:
+      tree = ast.parse(source)
+   except SyntaxError:
+      return {}
+
+   safety: dict[tuple[str, int], _FunctionSafety] = {}
+   global_keyword_arg_names = {
+      kw.arg
+      for child in ast.walk(tree)
+      if isinstance(child, ast.Call)
+      for kw in child.keywords
+      if kw.arg is not None
+   }
+   stack: list[tuple[str, str]] = []
+
+   class Visitor(ast.NodeVisitor):
+      def visit_ClassDef(self, node: ast.ClassDef) -> None:
+         stack.append((node.name, "class"))
+         for stmt in node.body:
+            self.visit(stmt)
+         stack.pop()
+
+      def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+         self._VisitFunction(node)
+
+      def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+         self._VisitFunction(node)
+
+      def _VisitFunction(
+         self, node: ast.FunctionDef | ast.AsyncFunctionDef
+      ) -> None:
+         qual_parts = [name for name, _ in stack] + [node.name]
+         qual = ".".join(qual_parts)
+         is_method = bool(stack and stack[-1][1] == "class")
+         args = node.args
+         has_unsafe_args = bool(
+            args.posonlyargs or args.kwonlyargs or args.vararg or args.kwarg
+         )
+         keyword_arg_names = set(global_keyword_arg_names)
+         safety[(qual, node.lineno)] = _FunctionSafety(
+            IsMethod        = is_method,
+            HasDecorators   = bool(node.decorator_list),
+            HasUnsafeArgs   = has_unsafe_args,
+            KeywordArgNames = keyword_arg_names,
+         )
+         stack.append((node.name, "function"))
+         for stmt in node.body:
+            self.visit(stmt)
+         stack.pop()
+
+   Visitor().visit(tree)
+   return safety
 
 
 @dataclass
@@ -260,6 +332,7 @@ def _AnalyseScope(
    scope: Scope,
    resolve: ResolveResult,
    pos_map: dict[tuple[str, int, int], bool],
+   safety_map: dict[tuple[str, int], _FunctionSafety],
 ) -> tuple[list[RenameItem], list[RenameSkip]]:
    """
    Analyse one function scope and return (items, skips).
@@ -270,6 +343,7 @@ def _AnalyseScope(
    items: list[RenameItem] = []
    skips: list[RenameSkip] = []
    qual  = scope.QualName
+   safety = safety_map.get((scope.QualName, scope.Line))
 
    # Whole-scope safety checks
    if _HasUnsafeDecl(scope):
@@ -282,13 +356,34 @@ def _AnalyseScope(
       )
       return items, skips
 
-   # Collect all local-write definitions in this scope
+   # Collect all safe local-write and private-helper parameter definitions.
    bad_defs: dict[str, list[tuple[int, int]]] = {}
+   def_kinds: dict[str, DefKind] = {}
+   allow_parameters = (
+      safety is not None
+      and scope.Name.startswith("_")
+      and not safety.IsMethod
+      and not safety.HasDecorators
+      and not safety.HasUnsafeArgs
+   )
    for name, defs in scope.Defs.items():
       if name.startswith("_"):
          continue
       local_defs = [d for d in defs if d.Kind == DefKind.LocalWrite]
-      if not local_defs:
+      param_defs = [d for d in defs if d.Kind == DefKind.Parameter]
+      selected_defs = local_defs
+      selected_kind = DefKind.LocalWrite
+      if not selected_defs and allow_parameters and param_defs:
+         if name in ("self", "cls"):
+            continue
+         if safety and name in safety.KeywordArgNames:
+            skips.append(RenameSkip(
+               qual, "parameter appears in keyword-call syntax", name
+            ))
+            continue
+         selected_defs = param_defs
+         selected_kind = DefKind.Parameter
+      if not selected_defs:
          continue
       if _IsSnake(name):
          continue
@@ -297,8 +392,9 @@ def _AnalyseScope(
          continue
       bad_defs[name] = [
          _FindNameToken(pos_map, name, d.Line, d.Col)
-         for d in local_defs
+         for d in selected_defs
       ]
+      def_kinds[name] = selected_kind
 
    if not bad_defs:
       return items, skips
@@ -332,7 +428,7 @@ def _AnalyseScope(
       local_def_set = {
          id(d)
          for d in scope.Defs[old_name]
-         if d.Kind == DefKind.LocalWrite
+         if d.Kind == def_kinds[old_name]
       }
       definition_sites: set[tuple[int, int]] = set(def_sites)
       read_sites      : set[tuple[int, int]] = set()
@@ -491,12 +587,13 @@ def PlanFile(path: Path) -> RenamePlan | FileError:
    all_skips  : list[RenameSkip] = []
    patch_map  : dict[tuple[int, int], str] = {}
    pos_map = _BuildTokenPosMap(source)
+   safety_map = _BuildFunctionSafetyMap(source)
 
    # Analyse every function/method scope independently
    for scope in resolve.Tree.AllScopes:
       if scope.Kind != ScopeKind.Function:
          continue
-      items, skips = _AnalyseScope(scope, resolve, pos_map)
+      items, skips = _AnalyseScope(scope, resolve, pos_map, safety_map)
       all_items.extend(items)
       all_skips.extend(skips)
 
