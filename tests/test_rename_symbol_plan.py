@@ -2222,8 +2222,9 @@ class TestRenameSymbolStatementComposerPhaseOne:
       assert "obj.findRepo()" in text
       assert "statement_builder.where(repo.tableName)" in text
 
-   def TestStatementComposerFunctionImportBucketOnly(self, tmp_path):
-      source = Path("tests/fixtures/rename/statementComposer.input.txt")
+   def TestStatementComposerPhaseOneCommandSequenceAppliesOnlyFunctionImportBucket(
+         self, tmp_path):
+      source = Path(__file__).parent / "fixtures" / "rename" / "statementComposer.input.txt"
       target = Write(
          tmp_path / "statementComposer.py",
          source.read_text(encoding="utf-8"),
@@ -2231,7 +2232,7 @@ class TestRenameSymbolStatementComposerPhaseOne:
       locator = tmp_path / "repos" / "Util" / "repositoryLocator.py"
       Write(locator, "def findRepo(model_type):\n   return model_type\n")
 
-      renames = [
+      command_sequence = [
          ("composeStatement", "ComposeStatement"),
          ("__buildConditions", "__BuildConditions"),
          ("__chainConditions", "__ChainConditions"),
@@ -2239,16 +2240,36 @@ class TestRenameSymbolStatementComposerPhaseOne:
          ("__addJoinedTables", "__AddJoinedTables"),
          ("findRepo", "FindRepo"),
       ]
-      for old_name, new_name in renames:
+      for old_name, new_name in command_sequence:
          rc, _, err = self.Apply(tmp_path, old_name, new_name)
          assert rc == 0, err
 
       text = target.read_text(encoding="utf-8")
-      for old_name, new_name in renames:
-         assert old_name not in text
-         assert new_name in text
+      locator_text = locator.read_text(encoding="utf-8")
+
+      assert "def ComposeStatement(" in text
+      assert "def __BuildConditions(" in text
+      assert "def __ChainConditions(" in text
+      assert "def __AddSelectsFromTargetTable(" in text
+      assert "def __AddJoinedTables(" in text
+      assert "__AddSelectsFromTargetTable(statementBuilder, repo)" in text
+      assert "__AddJoinedTables(statementBuilder, repo, includes)" in text
+      assert "__BuildConditions(statementBuilder, repo, conditions)" in text
+      assert "__ChainConditions(statementBuilder, repo, conditions[0])" in text
+      assert "__ChainConditions(statementBuilder, repo, conditions)" in text
+      assert "__ChainConditions(statementBuilder, repo, conditions[i])" in text
       assert "from repos.Util.repositoryLocator import FindRepo" in text
-      assert "targetRepo = FindRepo" in text
+      assert "targetRepo = FindRepo(conditions[0][0].modelType)" in text
+      assert "targetRepo = FindRepo(conditions[0].modelType)" in text
+      assert "targetRepo = FindRepo(conditions[i][0].modelType)" in text
+      assert "targetRepo = FindRepo(conditions[i].modelType)" in text
+      assert "def FindRepo(model_type):" in locator_text
+
+      for old_name, _ in command_sequence:
+         assert old_name not in text
+      assert "findRepo" not in locator_text
+
+      assert "statementBuilder = StatementBuilder()" in text
       assert "statementBuilder.fromTable(repo.tableName)" in text
       assert "statementBuilder.where(" in text
       assert "statementBuilder.include(" in text

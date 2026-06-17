@@ -88,6 +88,28 @@ manual API decisions, not by one broad local pass:
 
 ## Bucket ownership details
 
+### Phase 1 command sequence
+
+Run the Phase 1 function/import-symbol bucket against a fixture copy with this
+exact sequence:
+
+```bash
+customfmt rename-symbol <fixture-copy-root> --name composeStatement --to ComposeStatement --apply
+customfmt rename-symbol <fixture-copy-root> --name __buildConditions --to __BuildConditions --apply
+customfmt rename-symbol <fixture-copy-root> --name __chainConditions --to __ChainConditions --apply
+customfmt rename-symbol <fixture-copy-root> --name __addSelectsFromTargetTable --to __AddSelectsFromTargetTable --apply
+customfmt rename-symbol <fixture-copy-root> --name __addJoinedTables --to __AddJoinedTables --apply
+customfmt rename-symbol <fixture-copy-root> --name findRepo --to FindRepo --apply
+```
+
+This sequence is intentionally limited to function definitions, private helper
+definitions and direct helper calls, plus the safely resolved `FindRepo` import
+binding and direct calls. It must leave local variables, method calls, and
+attributes unchanged, including `statementBuilder`,
+`statementBuilder.fromTable`, `statementBuilder.where`,
+`statementBuilder.include`, `repo.tableName`, `repo.pk`, and
+`previousCondition.nextCondition`.
+
 ### `customfmt rename`
 
 `customfmt rename` owns local casing fixes for variables and local bindings in a
