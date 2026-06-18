@@ -1277,6 +1277,128 @@ class TestRenameSymbolApply:
       assert "return builder.Where()" in text
       assert "where" not in text
 
+   def TestApplyStatementComposerStyleProvenMethodCallsAndLeavesObjectAttributes(
+      self, tmp_path
+   ):
+      f = Write(
+         tmp_path / "main.py",
+         Src(
+            """
+            class StatementBuilder:
+               def where(self, condition):
+                  return self
+
+               def include(self, repo):
+                  return self
+
+               def orderBy(self, field):
+                  return self
+
+            def Compose(repo, condition, previous_condition):
+               statement_builder = StatementBuilder()
+               statement_builder.where(condition.modelType)
+               statement_builder.include(repo.tableName)
+               statement_builder.orderBy(repo.pk)
+               return previous_condition.nextCondition
+            """
+         ),
+      )
+
+      for old_name, new_name in [
+         ("where", "Where"),
+         ("include", "Include"),
+         ("orderBy", "OrderBy"),
+      ]:
+         rc, out, err = self.RunApply(f, "--name", old_name, "--to", new_name)
+         assert rc == 0
+         assert err == ""
+         assert f"renamed {f}" in out
+
+      text = f.read_text(encoding="utf-8")
+      assert "def Where(self, condition):" in text
+      assert "def Include(self, repo):" in text
+      assert "def OrderBy(self, field):" in text
+      assert "statement_builder.Where(condition.modelType)" in text
+      assert "statement_builder.Include(repo.tableName)" in text
+      assert "statement_builder.OrderBy(repo.pk)" in text
+      assert "repo.tableName" in text
+      assert "repo.pk" in text
+      assert "condition.modelType" in text
+      assert "previous_condition.nextCondition" in text
+
+   def TestApplyStatementComposerStyleUnknownReceiverWhereRefusesAndWritesNothing(
+      self, tmp_path
+   ):
+      original = Src(
+         """
+         class StatementBuilder:
+            def where(self, condition):
+               return self
+
+         def Compose(statement_builder, condition):
+            return statement_builder.where(condition)
+         """
+      )
+      f = Write(tmp_path / "main.py", original)
+
+      rc, out, err = self.RunApply(f, "--name", "where", "--to", "Where")
+
+      assert rc == 2
+      assert out == ""
+      assert "dynamic reference" in err
+      assert f.read_text(encoding="utf-8") == original
+
+   def TestApplyStatementComposerStyleInheritedMethodRefusesAndWritesNothing(
+      self, tmp_path
+   ):
+      original = Src(
+         """
+         class BaseBuilder:
+            def where(self, condition):
+               return self
+
+         class StatementBuilder(BaseBuilder):
+            pass
+
+         def Compose():
+            statement_builder = StatementBuilder()
+            return statement_builder.where(1)
+         """
+      )
+      f = Write(tmp_path / "main.py", original)
+
+      rc, out, err = self.RunApply(f, "--name", "where", "--to", "Where")
+
+      assert rc == 2
+      assert out == ""
+      assert "dynamic reference" in err
+      assert f.read_text(encoding="utf-8") == original
+
+   def TestApplyStatementComposerStyleExternalBuilderImportRefusesAndWritesNothing(
+      self, tmp_path
+   ):
+      original = Src(
+         """
+         class StatementBuilder:
+            def where(self, condition):
+               return self
+
+         from external.statement import StatementBuilder as ExternalStatementBuilder
+
+         def Compose():
+            statement_builder = ExternalStatementBuilder()
+            return statement_builder.where(1)
+         """
+      )
+      f = Write(tmp_path / "main.py", original)
+
+      rc, out, err = self.RunApply(f, "--name", "where", "--to", "Where")
+
+      assert rc == 2
+      assert out == ""
+      assert "dynamic reference" in err
+      assert f.read_text(encoding="utf-8") == original
+
    def TestApplySafeImportedClassMethodWritesDefinitionAndImportedReference(self, tmp_path):
       pkg = Package(tmp_path)
       model = Write(
