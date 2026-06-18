@@ -847,6 +847,166 @@ class TestAnalyseFile:
       assert "repo.pk" in result
       assert "previous_condition.nextCondition" in result
 
+   def TestPhase3CArtificialStatementBuilderMethodCallSmoke(self, tmp_path):
+      # This is intentionally not the real statementComposer fixture pipeline.
+      # Current receiver inference can prove local constructor assignments, not
+      # typed helper parameters passed through the fixture call graph.
+      project = tmp_path / "project"
+      project.mkdir()
+      (project / "dataAccess").mkdir()
+      target = Write(
+         project / "statement_composer_smoke.py",
+         Src(
+            """
+            from dataAccess.statementBuilder import StatementBuilder
+
+
+            def ComposeStatement(repo, conditions, previous_condition):
+               statement_builder = StatementBuilder()
+               statement_builder.fromTable(repo.tableName)
+               statement_builder.where(
+                  repo.tableName,
+                  conditions[0].fieldName,
+                  conditions[0].operation.value,
+                  conditions[0].condition,
+               )
+               statement_builder.include(
+                  repo.tableName,
+                  repo.pk,
+                  repo.references[0],
+                  repo.model.__name__,
+               )
+               statement_builder.includeOptional(
+                  conditions[0].modelType,
+                  conditions[0].fieldName,
+                  conditions[0].operation.value,
+                  conditions[0].condition,
+               )
+               statement_builder.orderBy([str(repo.pk)])
+               statement_builder.openBracket()
+               statement_builder.andWhere()
+               statement_builder.orWhere()
+               statement_builder.closeBracket()
+               statement_builder.select([repo.model.__name__])
+               return (
+                  statement_builder.getKWArgs(),
+                  previous_condition.nextCondition,
+               )
+            """
+         ),
+      )
+      Write(
+         project / "dataAccess" / "statementBuilder.py",
+         Src(
+            """
+            class StatementBuilder:
+               def fromTable(self, table):
+                  return self
+
+               def where(self, table, field=None, operation=None, condition=None):
+                  return self
+
+               def include(self, source, target, source_key, target_key):
+                  return self
+
+               def includeOptional(self, source, target, source_key, target_key):
+                  return self
+
+               def orderBy(self, columns):
+                  return self
+
+               def getKWArgs(self):
+                  return {}
+
+               def openBracket(self):
+                  return self
+
+               def closeBracket(self):
+                  return self
+
+               def andWhere(self):
+                  return self
+
+               def orWhere(self):
+                  return self
+
+               def select(self, columns):
+                  return self
+            """
+         ),
+      )
+
+      for old_name, new_name in (
+         ("fromTable", "FromTable"),
+         ("where", "Where"),
+         ("include", "Include"),
+         ("includeOptional", "IncludeOptional"),
+         ("orderBy", "OrderBy"),
+         ("getKWArgs", "GetKWArgs"),
+         ("openBracket", "OpenBracket"),
+         ("closeBracket", "CloseBracket"),
+         ("andWhere", "AndWhere"),
+         ("orWhere", "OrWhere"),
+         ("select", "Select"),
+      ):
+         assert RunMain(
+            "rename-symbol", str(project), "--name", old_name, "--to", new_name,
+            "--apply",
+         ) == 0
+
+      result = target.read_text(encoding="utf-8")
+      builder = (project / "dataAccess" / "statementBuilder.py").read_text(
+         encoding="utf-8")
+      ast.parse(result)
+      ast.parse(builder)
+
+      assert "def ComposeStatement(" in result
+      assert "statement_builder = StatementBuilder()" in result
+      assert "previous_condition.nextCondition" in result
+
+      for method in (
+         "FromTable",
+         "Where",
+         "Include",
+         "IncludeOptional",
+         "OrderBy",
+         "GetKWArgs",
+         "OpenBracket",
+         "CloseBracket",
+         "AndWhere",
+         "OrWhere",
+         "Select",
+      ):
+         assert f"def {method}(" in builder
+
+      for call in (
+         "statement_builder.FromTable(repo.tableName)",
+         "statement_builder.Where(",
+         "statement_builder.Include(",
+         "statement_builder.IncludeOptional(",
+         "statement_builder.OrderBy([str(repo.pk)])",
+         "statement_builder.GetKWArgs()",
+         "statement_builder.OpenBracket()",
+         "statement_builder.CloseBracket()",
+         "statement_builder.AndWhere()",
+         "statement_builder.OrWhere()",
+         "statement_builder.Select([repo.model.__name__])",
+      ):
+         assert call in result
+
+      for unchanged in (
+         "repo.tableName",
+         "repo.pk",
+         "repo.references",
+         "repo.model",
+         "conditions[0].modelType",
+         "conditions[0].fieldName",
+         "conditions[0].operation",
+         "conditions[0].condition",
+         "previous_condition.nextCondition",
+      ):
+         assert unchanged in result
+
    @pytest.mark.xfail(
       reason=(
          "Golden coverage for the intended statementComposer pipeline; current "
