@@ -2,11 +2,10 @@
 
 ## Status and scope
 
-This document designs a future Phase 3 rename bucket for conservative method-call
-and object-attribute casing support. It is a design-only document: it proposes no
-behavior changes, resolver changes, xfail removals, or implementation work in
-this PR. Phase 3A now implements read-only simple receiver method resolution;
-method apply/casing migration and object-attribute rename remain future work.
+This document designs a Phase 3 rename bucket for conservative method-call and
+object-attribute casing support. Phase 3A implements read-only simple receiver
+method resolution, and Phase 3B covers guarded apply for simple proven method
+calls. Object-attribute rename remains future work.
 
 The goal is to make future casing migrations possible only when the tool can
 prove the owner of an attribute access. The tool must not make arbitrary textual
@@ -15,7 +14,7 @@ replacements, must not guess from receiver names, and must not treat every
 
 ## Non-goals for this PR
 
-* No method rename apply behavior.
+* Simple proven method-call apply is covered by guarded method apply.
 * No object-attribute rename behavior.
 * No test xfail removal.
 * No broadening of `customfmt rename`.
@@ -186,9 +185,9 @@ ownership and must not rewrite `obj.attr` text by pattern.
 The `statementComposer` golden fixture includes several changes that look like
 simple casing fixes but are not safe local renames:
 
-* `statement_builder.where` to `statement_builder.Where` is not safe until the
-  tool proves `statement_builder` is a `StatementBuilder` and that `Where` is the
-  owned method declaration being migrated.
+* `statement_builder.where` to `statement_builder.Where` is safe only when the
+  guarded method apply proves `statement_builder` is a `StatementBuilder` and
+  that `where` is the owned method declaration being migrated.
 * `repo.tableName` to `repo.TableName` is not safe until the tool proves `repo`
   is a `BaseRepo` or known subclass and owns that attribute.
 * `conditions[*].modelType` to `ModelType` is a model/property migration and may
@@ -197,9 +196,9 @@ simple casing fixes but are not safe local renames:
   manual. It is not a safe rename inference because it changes both spelling and
   casing.
 
-For this reason, the statementComposer method/attribute bucket should remain
-`xfail(strict=True)` until a future implementation has targeted tests and safety
-guards for these tracks.
+For this reason, the full statementComposer method/attribute bucket should remain
+`xfail(strict=True)` until object-attribute rename and the remaining manual/API
+migration tracks have targeted tests and safety guards.
 
 ## Proposed future test matrix
 
@@ -208,15 +207,16 @@ any statementComposer xfail:
 
 | Area | Scenario | Expected result |
 | --- | --- | --- |
-| Method call | Safe same-file class method rename | Declaration and proven calls planned together |
-| Method call | Safe imported class method rename | Import graph proves class owner and calls |
+| Method call | Safe same-file class method rename | Covered by guarded method apply when declaration and proven calls are planned together |
+| Method call | Safe imported class method rename | Covered by guarded method apply when import graph proves class owner and calls |
 | Method call | Dynamic receiver | Blocked |
 | Method call | Inherited method | Blocked or explicitly unresolved until MRO handling is designed |
 | Method call | `getattr(obj, "method")` | Blocked |
 | Object attribute | Safe class attribute rename | Declaration and proven reads/writes planned together |
 | Object attribute | Dataclass/Pydantic field rename | Allowed only if complete and serialization implications are safe |
 | Object attribute | Dynamic `setattr`/`getattr`/`hasattr` | Blocked |
-| StatementComposer | Method/attribute bucket | Remains xfail until implemented |
+| StatementComposer | Simple proven method calls | Covered by guarded method apply smoke coverage |
+| StatementComposer | Object-attribute bucket | Remains future work; full golden remains xfail |
 
 ## Implementation boundaries for a future PR
 
