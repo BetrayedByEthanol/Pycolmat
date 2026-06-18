@@ -5,8 +5,8 @@
 This document designs a Phase 3 rename bucket for conservative method-call and
 object-attribute casing support. Phase 3A implements read-only simple receiver
 method resolution, Phase 3B covers guarded apply for simple proven method calls,
-and Phase 3C adds a focused statementComposer fixture slice for the method-call
-bucket. Object-attribute rename remains future work.
+and Phase 3C adds focused statementComposer-style smoke coverage for the
+method-call bucket. Object-attribute rename remains future work.
 
 The goal is to make future casing migrations possible only when the tool can
 prove the owner of an attribute access. The tool must not make arbitrary textual
@@ -201,8 +201,8 @@ simple casing fixes but are not safe local renames:
   manual. It is not a safe rename inference because it changes both spelling and
   casing.
 
-Phase 3C covers only the proven project-owned `StatementBuilder` method-call
-slice with a local fixture stub. Repository attributes, condition/model
+Phase 3C covers only an artificial, proven project-owned `StatementBuilder`
+method-call smoke slice with a local stub. Repository attributes, condition/model
 attributes, and typo/API migrations remain future/manual work. For this reason,
 the full statementComposer method/attribute bucket should remain
 `xfail(strict=True)` until object-attribute rename and the remaining manual/API
@@ -223,7 +223,7 @@ any statementComposer xfail:
 | Object attribute | Safe class attribute rename | Declaration and proven reads/writes planned together |
 | Object attribute | Dataclass/Pydantic field rename | Allowed only if complete and serialization implications are safe |
 | Object attribute | Dynamic `setattr`/`getattr`/`hasattr` | Blocked |
-| StatementComposer | Simple proven method calls | Covered by guarded method apply smoke coverage and the Phase 3C fixture slice |
+| StatementComposer | Simple proven method calls | Covered by guarded method apply smoke coverage and the Phase 3C statementComposer-style smoke test |
 | StatementComposer | Object-attribute bucket | Remains future work; full golden remains xfail |
 
 ## Implementation boundaries for a future PR

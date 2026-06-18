@@ -142,15 +142,17 @@ for `composeStatement`, private helper definition/call changes, and the
 own method-call casing, arbitrary object attribute casing, model/property field
 casing, or typo/API migrations.
 
-### Phase 3C proven method-call support
+### Phase 3C proven method-call smoke coverage
 
 Method-call casing for the statement-builder bucket is supported only through
 `customfmt rename-symbol` when the receiver type is proven and project-owned.
-The Phase 3C fixture slice uses a project-local `StatementBuilder` stub so calls
-such as `statement_builder.Where(...)`, `statement_builder.Include(...)`, and
+The Phase 3C smoke test uses an artificial statementComposer-style source file
+with a project-local `StatementBuilder` stub so calls such as
+`statement_builder.Where(...)`, `statement_builder.Include(...)`, and
 `statement_builder.OrderBy(...)` can be planned from the method declarations and
-validated call sites. This support must still reject dynamic receivers, external
-owners, inherited methods, and incomplete method plans.
+validated call sites without hand-editing the target between rename phases. This
+support must still reject dynamic receivers, external owners, inherited methods,
+and incomplete method plans.
 
 Object/model attributes remain outside this bucket. `repo.tableName`, `repo.pk`,
 `repo.references`, `repo.model`, `conditions[*].modelType`,
@@ -175,9 +177,9 @@ serialized, or used dynamically.
 while the pipeline is incomplete. The current `customfmt rename --apply` result
 is expected to cover only local-variable-style casing plus Phase 2 private-helper
 parameter casing and therefore should not match the golden fixture. Phase 3C adds
-a targeted method-call fixture slice for proven project-owned `StatementBuilder`
-receivers, but the full golden still includes object attribute casing,
-model/property casing, and the `closeBreacket` typo/API correction.
+a targeted artificial method-call smoke test for proven project-owned
+`StatementBuilder` receivers, but the full golden still includes object attribute
+casing, model/property casing, and the `closeBreacket` typo/API correction.
 
 Keeping the xfail strict is useful: it preserves the desired end-to-end target
 while preventing accidental unsafe broadening of the local rename planner. The
