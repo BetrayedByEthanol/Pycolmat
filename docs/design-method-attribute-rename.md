@@ -5,7 +5,8 @@
 This document designs a future Phase 3 rename bucket for conservative method-call
 and object-attribute casing support. It is a design-only document: it proposes no
 behavior changes, resolver changes, xfail removals, or implementation work in
-this PR.
+this PR. Phase 3A now implements read-only simple receiver method resolution;
+method apply/casing migration and object-attribute rename remain future work.
 
 The goal is to make future casing migrations possible only when the tool can
 prove the owner of an attribute access. The tool must not make arbitrary textual
@@ -14,10 +15,9 @@ replacements, must not guess from receiver names, and must not treat every
 
 ## Non-goals for this PR
 
-* No behavior changes.
-* No resolver changes.
+* No method rename apply behavior.
+* No object-attribute rename behavior.
 * No test xfail removal.
-* No implementation in this PR.
 * No broadening of `customfmt rename`.
 * No arbitrary search-and-replace for attribute text.
 
@@ -36,7 +36,43 @@ replacements, must not guess from receiver names, and must not treat every
 
 ## Track A: Method-call rename support
 
-### Supported future target pattern
+### Phase 3A implemented read-only target pattern
+
+`customfmt refs` can now classify simple instance method-call references as
+resolved when all of these facts are proven without writing files:
+
+1. The receiver variable has exactly one obvious type source in the local scope.
+2. The type source is a direct constructor assignment, a bare annotation, or an
+   annotated assignment.
+3. The receiver class resolves to a project-owned class, including supported
+   project imports.
+4. The method is declared directly on that class.
+
+Examples now supported read-only:
+
+```python
+class Builder:
+   def Where(self):
+      ...
+
+def Run():
+   builder = Builder()
+   builder.where()
+```
+
+```python
+from pkg.builder import Builder
+
+def Run():
+   builder: Builder
+   builder.where()
+```
+
+Reassigned receivers, unknown receivers, inherited methods, external classes,
+`getattr(obj, "where")`, strings, and unproven dynamic calls remain dynamic or
+unresolved. Phase 3A does not rename or apply any edits.
+
+### Supported future method-rename target pattern
 
 A future method-call rename may be considered only when all of these facts are
 proven:
@@ -94,7 +130,7 @@ bucket.
 
 ## Track B: Object-attribute rename support
 
-### Supported future target pattern
+### Supported future object-attribute target pattern
 
 A future object-attribute rename may be considered only when all of these facts
 are proven:

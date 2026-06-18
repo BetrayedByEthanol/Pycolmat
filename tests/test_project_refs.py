@@ -527,6 +527,221 @@ class TestProjectRefs:
       assert dynamic[0]["confidence"] == "dynamic"
       assert dynamic[0]["extra"]["full"] == "obj.Build"
 
+   def TestInstanceMethodSameFileConstructorReceiverResolves(self, tmp_path):
+      f = Write(
+         tmp_path / "main.py",
+         Src(
+            """
+            class Builder:
+               def where(self):
+                  return 1
+
+            def Run():
+               builder = Builder()
+               return builder.where()
+            """
+         ),
+      )
+
+      result, _ = FindRefsByName([str(f)], "where")
+      data = result.ToDict()
+      refs = [r for r in data["references"] if r["kind"] == "attribute_call"]
+
+      assert refs
+      assert refs[0]["confidence"] == "local_resolved"
+      assert refs[0]["resolved_to"]["kind"] == "method"
+      assert refs[0]["extra"]["receiver_kind"] == "instance"
+      assert refs[0]["extra"]["owner_class_name"] == "Builder"
+
+   def TestInstanceMethodImportedConstructorReceiverResolves(self, tmp_path):
+      pkg = Package(tmp_path)
+      builder_file = Write(
+         pkg / "builder.py",
+         Src(
+            """
+            class Builder:
+               def where(self):
+                  return 1
+            """
+         ),
+      )
+      Write(
+         pkg / "main.py",
+         Src(
+            """
+            from pkg.builder import Builder
+
+            def Run():
+               builder = Builder()
+               return builder.where()
+            """
+         ),
+      )
+
+      result, _ = FindRefsByName([str(pkg)], "where")
+      data = result.ToDict()
+      refs = [r for r in data["references"] if r["kind"] == "attribute_call"]
+
+      assert refs
+      assert refs[0]["confidence"] == "import_resolved"
+      assert refs[0]["resolved_to"]["file"] == str(builder_file)
+      assert refs[0]["extra"]["receiver_kind"] == "instance"
+
+   def TestInstanceMethodAnnotatedReceiverResolves(self, tmp_path):
+      f = Write(
+         tmp_path / "main.py",
+         Src(
+            """
+            class Builder:
+               def where(self):
+                  return 1
+
+            def Run():
+               builder: Builder
+               return builder.where()
+            """
+         ),
+      )
+
+      result, _ = FindRefsByName([str(f)], "where")
+      data = result.ToDict()
+      refs = [r for r in data["references"] if r["kind"] == "attribute_call"]
+
+      assert refs
+      assert refs[0]["confidence"] == "local_resolved"
+      assert refs[0]["extra"]["receiver_kind"] == "instance"
+
+   def TestInstanceMethodReassignedReceiverRemainsDynamic(self, tmp_path):
+      f = Write(
+         tmp_path / "main.py",
+         Src(
+            """
+            class Builder:
+               def where(self):
+                  return 1
+
+            class Other:
+               def where(self):
+                  return 2
+
+            def Run():
+               builder = Builder()
+               builder = Other()
+               return builder.where()
+            """
+         ),
+      )
+
+      result, _ = FindRefsByName([str(f)], "where")
+      data = result.ToDict()
+      dynamic = [r for r in data["dynamic_references"] if r["kind"] == "attribute_call"]
+
+      assert dynamic
+      assert dynamic[0]["confidence"] == "dynamic"
+
+   def TestInstanceMethodUnknownReceiverRemainsDynamic(self, tmp_path):
+      f = Write(tmp_path / "main.py", "def Run(builder):\n   return builder.where()\n")
+
+      result, _ = FindRefsByName([str(f)], "where")
+      data = result.ToDict()
+
+      assert data["dynamic_references"]
+      assert data["dynamic_references"][0]["extra"]["full"] == "builder.where"
+
+   def TestInstanceMethodGetattrStringRemainsDynamic(self, tmp_path):
+      f = Write(
+         tmp_path / "main.py",
+         Src(
+            """
+            class Builder:
+               def where(self):
+                  return 1
+
+            def Run():
+               builder = Builder()
+               return getattr(builder, "where")()
+            """
+         ),
+      )
+
+      result, _ = FindRefsByName([str(f)], "where")
+      data = result.ToDict()
+      dynamic = [r for r in data["dynamic_references"] if r["extra"].get("dynamic_reason") == "getattr_string"]
+
+      assert dynamic
+      assert dynamic[0]["confidence"] == "dynamic"
+
+   def TestInstanceMethodInheritedMethodRemainsDynamic(self, tmp_path):
+      f = Write(
+         tmp_path / "main.py",
+         Src(
+            """
+            class Base:
+               def where(self):
+                  return 1
+
+            class Builder(Base):
+               pass
+
+            def Run():
+               builder = Builder()
+               return builder.where()
+            """
+         ),
+      )
+
+      result, _ = FindRefsByName([str(f)], "where")
+      data = result.ToDict()
+      dynamic = [r for r in data["dynamic_references"] if r["kind"] == "attribute_call"]
+
+      assert dynamic
+      assert dynamic[0]["confidence"] == "dynamic"
+
+   def TestInstanceMethodExternalImportRemainsDynamic(self, tmp_path):
+      f = Write(
+         tmp_path / "main.py",
+         Src(
+            """
+            from external.builder import Builder
+
+            def Run():
+               builder = Builder()
+               return builder.where()
+            """
+         ),
+      )
+
+      result, _ = FindRefsByName([str(f)], "where")
+      data = result.ToDict()
+
+      assert data["dynamic_references"]
+      assert data["dynamic_references"][0]["confidence"] == "dynamic"
+
+   def TestStatementBuilderInstanceSmokeResolvesReadOnly(self, tmp_path):
+      f = Write(
+         tmp_path / "statement_builder.py",
+         Src(
+            """
+            class StatementBuilder:
+               def where(self, condition):
+                  return self
+
+            def Compose(condition):
+               statement_builder = StatementBuilder()
+               return statement_builder.where(condition)
+            """
+         ),
+      )
+
+      result, _ = FindRefsByName([str(f)], "where")
+      data = result.ToDict()
+      refs = [r for r in data["references"] if r["kind"] == "attribute_call"]
+
+      assert refs
+      assert refs[0]["confidence"] == "local_resolved"
+      assert refs[0]["extra"]["owner_class_name"] == "StatementBuilder"
+
+
    def TestJsonOutputShape(self, tmp_path, capsys):
       f = Write(tmp_path / "main.py", "def Build():\n   return 1\n")
 

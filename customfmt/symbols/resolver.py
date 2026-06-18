@@ -266,7 +266,12 @@ class _Resolver(ast.NodeVisitor):
       return name in cur.GlobalNames or name in cur.NonlocalNames
 
    def _RecordWriteName(
-      self, name: str, line: int, col: int, normal_kind: DefKind
+      self,
+      name: str,
+      line: int,
+      col: int,
+      normal_kind: DefKind,
+      extra: dict | None = None,
    ) -> None:
       """
       Record a single name as a write target.
@@ -281,7 +286,7 @@ class _Resolver(ast.NodeVisitor):
       if self._IsGlobalOrNonlocal(name):
          self._AddRef(name, RefKind.Write, line, col)
       else:
-         self._AddDef(name, normal_kind, line, col)
+         self._AddDef(name, normal_kind, line, col, extra)
 
    def _RecordWriteTarget(
       self, target: ast.expr, normal_kind: DefKind
@@ -396,7 +401,16 @@ class _Resolver(ast.NodeVisitor):
          self._WalkExprForRefs(node.value)
       else:
          for tgt in node.targets:
-            self._RecordWriteTarget(tgt, DefKind.LocalWrite)
+            if isinstance(tgt, ast.Name):
+               self._RecordWriteName(
+                  tgt.id,
+                  tgt.lineno,
+                  tgt.col_offset,
+                  DefKind.LocalWrite,
+                  self._ReceiverTypeExtraFromValue(node.value),
+               )
+            else:
+               self._RecordWriteTarget(tgt, DefKind.LocalWrite)
          self._WalkExprForRefs(node.value)
 
    def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
@@ -418,7 +432,8 @@ class _Resolver(ast.NodeVisitor):
                node.target.lineno,
                node.target.col_offset,
                DefKind.LocalWrite,
-               )
+               self._ReceiverTypeExtraFromAnnotation(node.annotation),
+            )
       # Always walk the annotation and the RHS value.
       self._RecordAnnotation(node.annotation)
       if node.value is not None:
@@ -443,6 +458,25 @@ class _Resolver(ast.NodeVisitor):
       else:
          self._RecordWriteTarget(node.target, DefKind.LocalWrite)
       self._WalkExprForRefs(node.value)
+
+
+   def _ReceiverTypeExtraFromValue(self, value: ast.expr) -> dict | None:
+      if not isinstance(value, ast.Call):
+         return None
+      if isinstance(value.func, ast.Name):
+         return {
+            "receiver_type_source": "constructor",
+            "receiver_type_name":   value.func.id,
+         }
+      return None
+
+   def _ReceiverTypeExtraFromAnnotation(self, ann: ast.expr | None) -> dict | None:
+      if isinstance(ann, ast.Name):
+         return {
+            "receiver_type_source": "annotation",
+            "receiver_type_name":   ann.id,
+         }
+      return None
 
    # -----------------------------------------------------------------------
    # For / with / except
@@ -615,6 +649,7 @@ class _Resolver(ast.NodeVisitor):
                attr_extra = safe_extra
             elif is_class_candidate:
                attr_extra["_receiver_name"] = receiver
+               attr_extra["receiver_name"] = receiver
             self._AddRef(
                attr, RefKind.AttrCall, ln, co,
                dynamic=safe_extra is None and not is_class_candidate,
@@ -733,7 +768,7 @@ class _Resolver(ast.NodeVisitor):
          ref.Extra["method_target"] = self._MethodTargetExtra(method_def)
          return True
 
-      receiver = ref.Extra.pop("_receiver_name", None)
+      receiver = ref.Extra.get("_receiver_name")
       if not isinstance(receiver, str):
          return False
       class_def = ref.ScopeRef.ResolveName(receiver)
