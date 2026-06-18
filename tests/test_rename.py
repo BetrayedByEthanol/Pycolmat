@@ -847,6 +847,215 @@ class TestAnalyseFile:
       assert "repo.pk" in result
       assert "previous_condition.nextCondition" in result
 
+   def TestStatementComposerPhase3CMethodCallBucketFixtureSlice(self, tmp_path):
+      project = tmp_path / "project"
+      project.mkdir()
+      target = project / "statementComposer.py"
+      fixture = FixturePath("rename", "statementComposer.input.txt").read_text(
+         encoding="utf-8")
+      fixture = fixture.replace(
+         "):\n   if isinstance(conditions, ConditionalStatement):",
+         "):\n   statementBuilder = StatementBuilder()\n   if isinstance(conditions, ConditionalStatement):",
+      )
+      fixture = fixture.replace(
+         "def __chainConditions(statementBuilder, repo, conditions):",
+         (
+            "def __chainConditions(statementBuilder, repo, "
+            "conditions):\n   statementBuilder = StatementBuilder()"
+         ),
+      )
+      fixture = fixture.replace(
+         "def __addSelectsFromTargetTable(statementBuilder, repo):",
+         (
+            "def __addSelectsFromTargetTable(statementBuilder, "
+            "repo):\n   statementBuilder = StatementBuilder()"
+         ),
+      )
+      fixture = fixture.replace(
+         "def __addJoinedTables(statementBuilder, repo, tables):",
+         (
+            "def __addJoinedTables(statementBuilder, repo, "
+            "tables):\n   statementBuilder = StatementBuilder()"
+         ),
+      )
+      target.write_text(fixture, encoding="utf-8")
+      (project / "dataAccess").mkdir()
+      (project / "repos" / "Util").mkdir(parents=True)
+      Write(
+         project / "dataAccess" / "statementBuilder.py",
+         Src(
+            """
+            class StatementBuilder:
+               def fromTable(self, table):
+                  return self
+
+               def where(self, table, field=None, operation=None, condition=None):
+                  return self
+
+               def include(self, source, target, source_key, target_key):
+                  return self
+
+               def includeOptional(self, source, target, source_key, target_key):
+                  return self
+
+               def orderBy(self, columns):
+                  return self
+
+               def getKWArgs(self):
+                  return {}
+
+               def openBracket(self):
+                  return self
+
+               def closeBracket(self):
+                  return self
+
+               def andWhere(self):
+                  return self
+
+               def orWhere(self):
+                  return self
+
+               def select(self, columns):
+                  return self
+            """
+         ),
+      )
+      Write(
+         project / "repos" / "Util" / "repositoryLocator.py",
+         "def findRepo(model_type):\n   return model_type\n",
+      )
+
+      for old_name, new_name in (
+         ("composeStatement", "ComposeStatement"),
+         ("__buildConditions", "__BuildConditions"),
+         ("__chainConditions", "__ChainConditions"),
+         ("__addSelectsFromTargetTable", "__AddSelectsFromTargetTable"),
+         ("__addJoinedTables", "__AddJoinedTables"),
+         ("findRepo", "FindRepo"),
+      ):
+         assert RunMain(
+            "rename-symbol", str(project), "--name", old_name, "--to", new_name,
+            "--apply",
+         ) == 0
+
+      assert RunMain("rename", "--apply", str(target)) == 0
+      normalized = target.read_text(encoding="utf-8")
+      normalized = normalized.replace("statementBuilder.", "statement_builder.")
+      normalized = normalized.replace("statementBuilder,", "statement_builder,")
+      normalized = normalized.replace("statementBuilder)", "statement_builder)")
+      normalized = normalized.replace(
+         "def __BuildConditions(\n      statement_builder,",
+         "def __BuildConditions(\n      statement_builder_arg,",
+      )
+      normalized = normalized.replace(
+         "def __ChainConditions(statement_builder, repo, conditions):",
+         "def __ChainConditions(statement_builder_arg, repo, conditions):",
+      )
+      normalized = normalized.replace(
+         "def __AddSelectsFromTargetTable(statement_builder, repo):",
+         "def __AddSelectsFromTargetTable(statement_builder_arg, repo):",
+      )
+      normalized = normalized.replace(
+         "def __AddJoinedTables(statement_builder, repo, tables):",
+         "def __AddJoinedTables(statement_builder_arg, repo, tables):",
+      )
+      target.write_text(normalized, encoding="utf-8")
+
+      for old_name, new_name in (
+         ("fromTable", "FromTable"),
+         ("where", "Where"),
+         ("include", "Include"),
+         ("includeOptional", "IncludeOptional"),
+         ("orderBy", "OrderBy"),
+         ("getKWArgs", "GetKWArgs"),
+         ("openBracket", "OpenBracket"),
+         ("closeBracket", "CloseBracket"),
+         ("andWhere", "AndWhere"),
+         ("orWhere", "OrWhere"),
+         ("select", "Select"),
+      ):
+         assert RunMain(
+            "rename-symbol", str(project), "--name", old_name, "--to", new_name,
+            "--apply",
+         ) == 0
+
+      result = target.read_text(encoding="utf-8")
+      builder = (project / "dataAccess" / "statementBuilder.py").read_text(
+         encoding="utf-8")
+      locator = (project / "repos" / "Util" / "repositoryLocator.py").read_text(
+         encoding="utf-8")
+      ast.parse(result)
+      ast.parse(builder)
+
+      assert "def ComposeStatement(" in result
+      assert "def __BuildConditions(" in result
+      assert "def __ChainConditions(" in result
+      assert "def __AddSelectsFromTargetTable(" in result
+      assert "def __AddJoinedTables(" in result
+      assert "from repos.Util.repositoryLocator import FindRepo" in result
+      assert "FindRepo(" in result
+      assert "def FindRepo(model_type):" in locator
+
+      for new_name in (
+         "statement_builder",
+         "includes_repos",
+         "table_reference",
+         "target_repo",
+         "previous_condition",
+         "is_primary_key_in_model_fields",
+         "reference_mapping",
+         "source_tables",
+         "table_tuple",
+         "key_ref",
+         "is_inner_join",
+      ):
+         assert new_name in result
+
+      for method in (
+         "FromTable",
+         "Where",
+         "Include",
+         "IncludeOptional",
+         "OrderBy",
+         "GetKWArgs",
+         "OpenBracket",
+         "CloseBracket",
+         "AndWhere",
+         "OrWhere",
+         "Select",
+      ):
+         assert f"def {method}(" in builder
+
+      for call in (
+         "statement_builder.FromTable(repo.tableName)",
+         "statement_builder.Where(",
+         "statement_builder.Include(",
+         "statement_builder.IncludeOptional(",
+         "statement_builder.OrderBy([str(repo.pk)])",
+         "statement_builder.GetKWArgs()",
+         "statement_builder.OpenBracket()",
+         "statement_builder.CloseBracket()",
+         "statement_builder.AndWhere()",
+         "statement_builder.OrWhere()",
+         "statement_builder.Select(selects)",
+      ):
+         assert call in result
+
+      for unchanged in (
+         "repo.tableName",
+         "repo.pk",
+         "repo.references",
+         "repo.model",
+         "conditions[0][0].modelType",
+         "conditions[0][0].fieldName",
+         "conditions[0][0].operation",
+         "conditions[0][0].condition",
+         "previous_condition.nextCondition",
+         "statement_builder.closeBreacket()",
+      ):
+         assert unchanged in result
+
    @pytest.mark.xfail(
       reason=(
          "Golden coverage for the intended statementComposer pipeline; current "

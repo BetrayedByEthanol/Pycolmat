@@ -69,15 +69,15 @@ manual API decisions, not by one broad local pass:
 | `__addSelectsFromTargetTable` -> `__AddSelectsFromTargetTable` | private helper definition and same-file call | private helper function rename | `customfmt rename-symbol` |
 | `__addJoinedTables` -> `__AddJoinedTables` | private helper definition and same-file call | private helper function rename | `customfmt rename-symbol` |
 | `from repos.Util.repositoryLocator import findRepo` -> `FindRepo` | import binding and call sites | imported symbol rename | `customfmt rename-symbol`, after project refs prove the imported definition and all safe references |
-| `statement_builder.fromTable` -> `FromTable` | statement-builder fluent API calls | method call rename | future method/attribute rename support, not `customfmt rename` |
-| `statement_builder.orderBy` -> `OrderBy` | statement-builder fluent API calls | method call rename | future method/attribute rename support, not `customfmt rename` |
-| `statement_builder.getKWArgs` -> `GetKWArgs` | statement-builder result extraction | method call rename | future method/attribute rename support, not `customfmt rename` |
-| `statement_builder.openBracket` -> `OpenBracket` | statement-builder grouping API | method call rename | future method/attribute rename support, not `customfmt rename` |
-| `statement_builder.where` -> `Where` | statement-builder predicate API | method call rename | future method/attribute rename support, not `customfmt rename` |
-| `statement_builder.andWhere` -> `AndWhere` and `orWhere` -> `OrWhere` | condition chain API | method call rename | future method/attribute rename support, not `customfmt rename` |
-| `statement_builder.closeBracket` -> `CloseBracket` | statement-builder grouping API | method call rename | future method/attribute rename support, not `customfmt rename` |
-| `statement_builder.select` -> `Select` | select-list API | method call rename | future method/attribute rename support, not `customfmt rename` |
-| `statement_builder.include` -> `Include` and `includeOptional` -> `IncludeOptional` | join API calls | method call rename | future method/attribute rename support, not `customfmt rename` |
+| `statement_builder.fromTable` -> `FromTable` | statement-builder fluent API calls | method call rename | `customfmt rename-symbol` only when the receiver is proven to be a project-owned `StatementBuilder` |
+| `statement_builder.orderBy` -> `OrderBy` | statement-builder fluent API calls | method call rename | `customfmt rename-symbol` only when the receiver is proven to be a project-owned `StatementBuilder` |
+| `statement_builder.getKWArgs` -> `GetKWArgs` | statement-builder result extraction | method call rename | `customfmt rename-symbol` only when the receiver is proven to be a project-owned `StatementBuilder` |
+| `statement_builder.openBracket` -> `OpenBracket` | statement-builder grouping API | method call rename | `customfmt rename-symbol` only when the receiver is proven to be a project-owned `StatementBuilder` |
+| `statement_builder.where` -> `Where` | statement-builder predicate API | method call rename | `customfmt rename-symbol` only when the receiver is proven to be a project-owned `StatementBuilder` |
+| `statement_builder.andWhere` -> `AndWhere` and `orWhere` -> `OrWhere` | condition chain API | method call rename | `customfmt rename-symbol` only when the receiver is proven to be a project-owned `StatementBuilder` |
+| `statement_builder.closeBracket` -> `CloseBracket` | statement-builder grouping API | method call rename | `customfmt rename-symbol` only when the receiver is proven to be a project-owned `StatementBuilder`; does not cover `closeBreacket` |
+| `statement_builder.select` -> `Select` | select-list API | method call rename | `customfmt rename-symbol` only when the receiver is proven to be a project-owned `StatementBuilder` |
+| `statement_builder.include` -> `Include` and `includeOptional` -> `IncludeOptional` | join API calls | method call rename | `customfmt rename-symbol` only when the receiver is proven to be a project-owned `StatementBuilder` |
 | `repo.tableName`, `rep.tableName`, `inc.tableName`, `target_repo.tableName` -> `TableName` | repository attributes used for SQL aliases and references | object attribute rename | future method/attribute rename support if repository declarations are proven; otherwise manual/API migration |
 | `repo.pk`, `inc.pk` -> `Pk` | repository primary-key metadata | object attribute rename | future method/attribute rename support if declarations are proven; otherwise manual/API migration |
 | `repo.references`, `inc.references` -> `References` | repository relationship metadata | object attribute rename | future method/attribute rename support if declarations are proven; otherwise manual/API migration |
@@ -142,35 +142,41 @@ for `composeStatement`, private helper definition/call changes, and the
 own method-call casing, arbitrary object attribute casing, model/property field
 casing, or typo/API migrations.
 
-### Future method/attribute rename support
+### Phase 3C proven method-call support
 
-Method calls and object attributes need a separate conservative design. A safe
-version would need to prove receiver type, declaration ownership, import graph,
-subclass/override risks, dynamic reference exclusions, and complete affected
-references before applying edits. It must reject or skip dynamic receivers such
-as untyped `repo`, `inc`, and `target_repo` unless their concrete declarations
-and all relevant references are proven.
+Method-call casing for the statement-builder bucket is supported only through
+`customfmt rename-symbol` when the receiver type is proven and project-owned.
+The Phase 3C fixture slice uses a project-local `StatementBuilder` stub so calls
+such as `statement_builder.Where(...)`, `statement_builder.Include(...)`, and
+`statement_builder.OrderBy(...)` can be planned from the method declarations and
+validated call sites. This support must still reject dynamic receivers, external
+owners, inherited methods, and incomplete method plans.
 
-This future support is where `statement_builder.Where`, `repo.TableName`,
-`repo.Pk`, and similar API-casing changes belong. They must not be smuggled into
+Object/model attributes remain outside this bucket. `repo.tableName`, `repo.pk`,
+`repo.references`, `repo.model`, `conditions[*].modelType`,
+`conditions[*].fieldName`, `conditions[*].operation`,
+`conditions[*].condition`, and `previous_condition.nextCondition` must not be
+changed by the method-call pipeline. They must not be smuggled into
 `customfmt rename` by matching attribute text.
 
 ### Manual/API migration only
 
 Some changes represent product API decisions rather than mechanically safe
 renames. The `closeBreacket` to `CloseBracket` change is both a casing change
-and a spelling correction, so it requires an explicit API migration decision.
-Model and condition properties may also require manual migration when they are
-framework-reflected, generated, serialized, or used dynamically.
+and a spelling correction, so it requires an explicit API migration decision
+unless the fixture actually declares a `closeBracket` method and the call is an
+exact proven reference to that declared method. Model and condition properties
+may also require manual migration when they are framework-reflected, generated,
+serialized, or used dynamically.
 
 ## Test notes
 
 `TestStatementComposerFutureGoldenFixturePipeline` must remain `xfail(strict=True)`
 while the pipeline is incomplete. The current `customfmt rename --apply` result
 is expected to cover only local-variable-style casing plus Phase 2 private-helper
-parameter casing and therefore should not match the golden fixture, which also
-includes project symbol renames,
-import-binding renames, method-call casing, object attribute casing,
+parameter casing and therefore should not match the golden fixture. Phase 3C adds
+a targeted method-call fixture slice for proven project-owned `StatementBuilder`
+receivers, but the full golden still includes object attribute casing,
 model/property casing, and the `closeBreacket` typo/API correction.
 
 Keeping the xfail strict is useful: it preserves the desired end-to-end target

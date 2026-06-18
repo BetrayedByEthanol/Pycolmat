@@ -4,8 +4,9 @@
 
 This document designs a Phase 3 rename bucket for conservative method-call and
 object-attribute casing support. Phase 3A implements read-only simple receiver
-method resolution, and Phase 3B covers guarded apply for simple proven method
-calls. Object-attribute rename remains future work.
+method resolution, Phase 3B covers guarded apply for simple proven method calls,
+and Phase 3C adds a focused statementComposer fixture slice for the method-call
+bucket. Object-attribute rename remains future work.
 
 The goal is to make future casing migrations possible only when the tool can
 prove the owner of an attribute access. The tool must not make arbitrary textual
@@ -14,7 +15,8 @@ replacements, must not guess from receiver names, and must not treat every
 
 ## Non-goals for this PR
 
-* Simple proven method-call apply is covered by guarded method apply.
+* Simple proven method-call apply is covered by guarded method apply only for
+  proven project-owned receiver types.
 * No object-attribute rename behavior.
 * No test xfail removal.
 * No broadening of `customfmt rename`.
@@ -47,7 +49,8 @@ resolved when all of these facts are proven without writing files:
    project imports.
 4. The method is declared directly on that class.
 
-Examples now supported read-only:
+Examples now supported read-only, and supported by guarded `rename-symbol
+--diff` / `--apply` when the complete method reference set is proven:
 
 ```python
 class Builder:
@@ -69,7 +72,9 @@ def Run():
 
 Reassigned receivers, unknown receivers, inherited methods, external classes,
 `getattr(obj, "where")`, strings, and unproven dynamic calls remain dynamic or
-unresolved. Phase 3A does not rename or apply any edits.
+unresolved. The method-call bucket is intentionally limited to project-owned
+receiver classes whose constructor or annotation can be proven by the project
+reference graph.
 
 ### Supported future method-rename target pattern
 
@@ -196,7 +201,10 @@ simple casing fixes but are not safe local renames:
   manual. It is not a safe rename inference because it changes both spelling and
   casing.
 
-For this reason, the full statementComposer method/attribute bucket should remain
+Phase 3C covers only the proven project-owned `StatementBuilder` method-call
+slice with a local fixture stub. Repository attributes, condition/model
+attributes, and typo/API migrations remain future/manual work. For this reason,
+the full statementComposer method/attribute bucket should remain
 `xfail(strict=True)` until object-attribute rename and the remaining manual/API
 migration tracks have targeted tests and safety guards.
 
@@ -215,7 +223,7 @@ any statementComposer xfail:
 | Object attribute | Safe class attribute rename | Declaration and proven reads/writes planned together |
 | Object attribute | Dataclass/Pydantic field rename | Allowed only if complete and serialization implications are safe |
 | Object attribute | Dynamic `setattr`/`getattr`/`hasattr` | Blocked |
-| StatementComposer | Simple proven method calls | Covered by guarded method apply smoke coverage |
+| StatementComposer | Simple proven method calls | Covered by guarded method apply smoke coverage and the Phase 3C fixture slice |
 | StatementComposer | Object-attribute bucket | Remains future work; full golden remains xfail |
 
 ## Implementation boundaries for a future PR
