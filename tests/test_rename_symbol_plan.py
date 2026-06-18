@@ -803,6 +803,57 @@ class TestRenameSymbolDiff:
       assert "+   def Make(self):" in out
       assert f.read_text(encoding="utf-8") == original
 
+   def TestMethodDiffRenamesDefinitionAndSimpleInstanceReceiverReference(self, tmp_path):
+      original = Src(
+         """
+         class Builder:
+            def where(self):
+               return 1
+
+         def Run():
+            builder = Builder()
+            return builder.where()
+         """
+      )
+      f = Write(tmp_path / "main.py", original)
+
+      rc, out, err = self.RunDiff(f, "--name", "where", "--to", "Where")
+
+      assert rc == 0
+      assert err == ""
+      assert "-   def where(self):" in out
+      assert "+   def Where(self):" in out
+      assert "-   return builder.where()" in out
+      assert "+   return builder.Where()" in out
+      assert f.read_text(encoding="utf-8") == original
+
+   def TestMethodDiffRenamesAnnotatedAssignmentInstanceReceiverReference(self, tmp_path):
+      original = Src(
+         """
+         class Builder:
+            def where(self):
+               return 1
+
+         def MakeBuilder():
+            return Builder()
+
+         def Run():
+            builder: Builder = MakeBuilder()
+            return builder.where()
+         """
+      )
+      f = Write(tmp_path / "main.py", original)
+
+      rc, out, err = self.RunDiff(f, "--name", "where", "--to", "Where")
+
+      assert rc == 0
+      assert err == ""
+      assert "-   def where(self):" in out
+      assert "+   def Where(self):" in out
+      assert "-   return builder.where()" in out
+      assert "+   return builder.Where()" in out
+      assert f.read_text(encoding="utf-8") == original
+
    def TestDiffIncludesNamespaceAbsoluteImportBindingAndCallSite(self, tmp_path):
       ns = tmp_path / "ns"
       Write(ns / "models.py", "class UserModel:\n   pass\n")
@@ -1168,6 +1219,63 @@ class TestRenameSymbolApply:
       assert "def Make(self):" in text
       assert "return Repo.Make(repo)" in text
       assert "Build" not in text
+
+   def TestApplySafeSimpleInstanceReceiverWritesDefinitionAndReference(self, tmp_path):
+      f = Write(
+         tmp_path / "main.py",
+         Src(
+            """
+            class Builder:
+               def where(self):
+                  return 1
+
+            def Run():
+               builder = Builder()
+               return builder.where()
+            """
+         ),
+      )
+
+      rc, out, err = self.RunApply(f, "--name", "where", "--to", "Where")
+
+      assert rc == 0
+      assert err == ""
+      assert f"renamed {f}" in out
+      text = f.read_text(encoding="utf-8")
+      assert "def Where(self):" in text
+      assert "return builder.Where()" in text
+      assert "where" not in text
+
+   def TestApplySafeAnnotatedAssignmentInstanceReceiverWritesDefinitionAndReference(
+      self, tmp_path
+   ):
+      f = Write(
+         tmp_path / "main.py",
+         Src(
+            """
+            class Builder:
+               def where(self):
+                  return 1
+
+            def MakeBuilder():
+               return Builder()
+
+            def Run():
+               builder: Builder = MakeBuilder()
+               return builder.where()
+            """
+         ),
+      )
+
+      rc, out, err = self.RunApply(f, "--name", "where", "--to", "Where")
+
+      assert rc == 0
+      assert err == ""
+      assert f"renamed {f}" in out
+      text = f.read_text(encoding="utf-8")
+      assert "def Where(self):" in text
+      assert "return builder.Where()" in text
+      assert "where" not in text
 
    def TestApplySafeImportedClassMethodWritesDefinitionAndImportedReference(self, tmp_path):
       pkg = Package(tmp_path)
