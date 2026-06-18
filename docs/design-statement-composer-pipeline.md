@@ -154,6 +154,12 @@ validated call sites without hand-editing the target between rename phases. This
 support must still reject dynamic receivers, external owners, inherited methods,
 and incomplete method plans.
 
+Phase 3C does not claim that the real statementComposer fixture helper-parameter
+pipeline is complete. Inference for typed or call-threaded helper parameters,
+such as proving every private-helper `statementBuilder` parameter is the same
+project-owned builder created by `ComposeStatement`, remains a separate Phase 3D
+design topic.
+
 Object/model attributes remain outside this bucket. `repo.tableName`, `repo.pk`,
 `repo.references`, `repo.model`, `conditions[*].modelType`,
 `conditions[*].fieldName`, `conditions[*].operation`,

@@ -847,7 +847,10 @@ class TestAnalyseFile:
       assert "repo.pk" in result
       assert "previous_condition.nextCondition" in result
 
-   def TestStatementComposerPhase3CArtificialMethodCallSmoke(self, tmp_path):
+   def TestPhase3CArtificialStatementBuilderMethodCallSmoke(self, tmp_path):
+      # This is intentionally not the real statementComposer fixture pipeline.
+      # Current receiver inference can prove local constructor assignments, not
+      # typed helper parameters passed through the fixture call graph.
       project = tmp_path / "project"
       project.mkdir()
       (project / "dataAccess").mkdir()

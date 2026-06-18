@@ -208,6 +208,11 @@ the full statementComposer method/attribute bucket should remain
 `xfail(strict=True)` until object-attribute rename and the remaining manual/API
 migration tracks have targeted tests and safety guards.
 
+Typed helper-parameter receiver inference for the real statementComposer fixture
+is not part of Phase 3C. Proving that a helper parameter such as
+`statementBuilder` is always a project-owned `StatementBuilder` through the
+fixture call graph should be designed and tested as a separate Phase 3D task.
+
 ## Proposed future test matrix
 
 When a future implementation is started, add targeted coverage before removing
