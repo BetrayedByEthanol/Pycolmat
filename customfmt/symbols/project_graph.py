@@ -286,7 +286,9 @@ class ProjectGraph:
       extra = dict(ref.Extra)
 
       if ref.IsDynamic:
-         class_method_target = self._ResolveDynamicClassMethodAttribute(ref)
+         class_method_target = self._ResolveDynamicReceiverMethodAttribute(ref)
+         if class_method_target is None:
+            class_method_target = self._ResolveDynamicClassMethodAttribute(ref)
          if class_method_target is not None:
             confidence = class_method_target.Confidence
             target = self._ProjectDefinition(
@@ -295,7 +297,11 @@ class ProjectGraph:
             )
             extra = {
                **extra,
-               "receiver_kind":              "class",
+               "receiver_kind":              (
+                  "instance"
+                  if class_method_target.Reason == "receiver_type_found"
+                  else "class"
+               ),
                "owner_class_name":           class_method_target.OwnerClass.Name,
                "owner_class_qualified_name": self._ClassQualifiedName(
                   class_method_target.OwnerClass
@@ -413,6 +419,42 @@ class ProjectGraph:
    # Import resolution
    # -----------------------------------------------------------------------
 
+
+
+   def _ResolveDynamicReceiverMethodAttribute(
+      self, ref: Reference
+   ) -> _ClassMethodTarget | None:
+      receiver = ref.Extra.get("receiver_name")
+      if not isinstance(receiver, str) or not receiver:
+         return None
+      type_name = self._ReceiverTypeName(ref, receiver)
+      if type_name is None:
+         return None
+      class_target = self._ResolveSimpleClassName(ref, type_name)
+      if class_target is None:
+         return None
+      method = self._DirectMethodForClass(class_target.OwnerClass, ref.Name)
+      if method is None:
+         return None
+      return _ClassMethodTarget(
+         Confidence = class_target.Confidence,
+         Method     = method,
+         OwnerClass = class_target.OwnerClass,
+         Module     = class_target.Module,
+         Reason     = "receiver_type_found",
+      )
+
+   def _ReceiverTypeName(self, ref: Reference, receiver: str) -> str | None:
+      defs = [
+         defn for defn in ref.ScopeRef.Defs.get(receiver, [])
+         if defn.Line <= ref.Line
+      ]
+      if len(defs) != 1:
+         return None
+      type_name = defs[0].Extra.get("receiver_type_name")
+      if not isinstance(type_name, str) or not type_name:
+         return None
+      return type_name
 
    def _ResolveDynamicClassMethodAttribute(
       self, ref: Reference
