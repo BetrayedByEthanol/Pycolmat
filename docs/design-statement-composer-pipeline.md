@@ -11,6 +11,9 @@ local rename pass until the golden output passes.
 This document analyzes the full delta and assigns ownership for each kind of
 change. It intentionally proposes no formatter or resolver behavior changes.
 
+Phase 3 method-call and object-attribute casing is designed separately in
+[`docs/design-method-attribute-rename.md`](design-method-attribute-rename.md).
+
 ## Safety principles
 
 * The existing local rename tool, `customfmt rename`, must remain a conservative
