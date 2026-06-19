@@ -159,6 +159,7 @@ class ProjectGraph:
       self._AmbiguousModules : set[str]                  = set()
       self._ModuleDefs       : dict[tuple[str, str], Definition] = {}
       self._ImportCache      : dict[_SymbolLocation, _ImportTarget] = {}
+      self._HelperParamTypes : dict[tuple[str, int, int, str], _ClassMethodTarget] | None = None
       self._BuildModuleMap()
       self._BuildModuleDefs()
 
@@ -427,12 +428,16 @@ class ProjectGraph:
       receiver = ref.Extra.get("receiver_name")
       if not isinstance(receiver, str) or not receiver:
          return None
-      type_name = self._ReceiverTypeName(ref, receiver)
-      if type_name is None:
-         return None
-      class_target = self._ResolveSimpleClassName(ref, type_name)
-      if class_target is None:
-         return None
+      param_target = self._InferredTargetForReceiver(ref, receiver)
+      if param_target is not None:
+         class_target = param_target
+      else:
+         type_name = self._ReceiverTypeName(ref, receiver)
+         if type_name is None:
+            return None
+         class_target = self._ResolveSimpleClassName(ref, type_name)
+         if class_target is None:
+            return None
       method = self._DirectMethodForClass(class_target.OwnerClass, ref.Name)
       if method is None:
          return None
@@ -452,9 +457,123 @@ class ProjectGraph:
       if len(defs) != 1:
          return None
       type_name = defs[0].Extra.get("receiver_type_name")
+      if isinstance(type_name, str) and type_name:
+         return type_name
+      return None
+
+   def _InferredTargetForReceiver(
+      self, ref: Reference, receiver: str
+   ) -> _ClassMethodTarget | None:
+      defs = [
+         defn for defn in ref.ScopeRef.Defs.get(receiver, [])
+         if defn.Line <= ref.Line
+      ]
+      if len(defs) != 1 or defs[0].Kind != DefKind.Parameter:
+         return None
+      return self._InferredHelperParamType(defs[0])
+
+   def _InferredHelperParamType(self, defn: Definition) -> _ClassMethodTarget | None:
+      if self._HelperParamTypes is None:
+         self._HelperParamTypes = self._BuildHelperParamTypes()
+      key = (
+         str(Path(defn.ScopeRef.FilePath).resolve()),
+         defn.ScopeRef.Line,
+         defn.ScopeRef.Col,
+         defn.Name,
+      )
+      return self._HelperParamTypes.get(key)
+
+   def _BuildHelperParamTypes(self) -> dict[tuple[str, int, int, str], _ClassMethodTarget]:
+      params_by_func: dict[tuple[str, int, int], list[Definition]] = {}
+      for defn in self._AllDefinitions():
+         if defn.Kind != DefKind.Parameter:
+            continue
+         scope = defn.ScopeRef
+         params_by_func.setdefault((
+            str(Path(scope.FilePath).resolve()), scope.Line, scope.Col,
+         ), []).append(defn)
+
+      candidates: dict[tuple[str, int, int, str], dict[_SymbolLocation, _ClassMethodTarget]] = {}
+      blocked: set[tuple[str, int, int, str]] = set()
+      function_calls: dict[tuple[str, int, int], list[Reference]] = {}
+      for ref in self._AllReferences():
+         if ref.Kind.value != "call" or ref.IsDynamic:
+            continue
+         callee = self._ResolveProjectFunctionCall(ref)
+         if callee is None:
+            continue
+         loc = self._FunctionLocation(callee)
+         if loc not in params_by_func:
+            continue
+         function_calls.setdefault(loc, []).append(ref)
+
+      for func_loc, calls in function_calls.items():
+         params = params_by_func.get(func_loc, [])
+         for call in calls:
+            if call.Extra.get("has_starargs") or call.Extra.get("has_kwargs"):
+               for param in params:
+                  blocked.add((*func_loc, param.Name))
+               continue
+            if call.Extra.get("keyword_names"):
+               for param in params:
+                  blocked.add((*func_loc, param.Name))
+               continue
+            arg_names = call.Extra.get("arg_names")
+            if not isinstance(arg_names, list):
+               continue
+            for index, param in enumerate(params):
+               key = (*func_loc, param.Name)
+               if index >= len(arg_names) or not isinstance(arg_names[index], str):
+                  blocked.add(key)
+                  continue
+               type_name = self._RawReceiverTypeName(call, arg_names[index])
+               if type_name is None:
+                  blocked.add(key)
+                  continue
+               class_target = self._ResolveSimpleClassName(call, type_name)
+               if class_target is None:
+                  blocked.add(key)
+                  continue
+               candidates.setdefault(key, {})[
+                  self._DefLocation(class_target.OwnerClass)
+               ] = class_target
+
+      inferred: dict[tuple[str, int, int, str], _ClassMethodTarget] = {}
+      for key, types in candidates.items():
+         if key in blocked or len(types) != 1:
+            continue
+         inferred[key] = next(iter(types.values()))
+      return inferred
+
+   def _RawReceiverTypeName(self, ref: Reference, receiver: str) -> str | None:
+      defs = [
+         defn for defn in ref.ScopeRef.Defs.get(receiver, [])
+         if defn.Line <= ref.Line
+      ]
+      if len(defs) != 1:
+         return None
+      type_name = defs[0].Extra.get("receiver_type_name")
       if not isinstance(type_name, str) or not type_name:
          return None
       return type_name
+
+   def _ResolveProjectFunctionCall(self, ref: Reference) -> Definition | None:
+      defn = ref.ResolvedTo or ref.ScopeRef.ResolveName(ref.Name)
+      if defn is None:
+         return None
+      if defn.Kind == DefKind.FunctionDef:
+         return defn
+      if defn.Kind not in (DefKind.Import, DefKind.ImportFrom):
+         return None
+      import_target = self._ResolveImportDefinition(defn)
+      if import_target.Confidence != CONF_IMPORT_RESOLVED:
+         return None
+      if import_target.Target is None or import_target.Target.Kind != DefKind.FunctionDef:
+         return None
+      return import_target.Target
+
+   def _FunctionLocation(self, defn: Definition) -> tuple[str, int, int]:
+      return (str(Path(defn.ScopeRef.FilePath).resolve()), defn.Line, defn.Col)
 
    def _ResolveDynamicClassMethodAttribute(
       self, ref: Reference

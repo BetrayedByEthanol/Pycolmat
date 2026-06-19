@@ -627,7 +627,17 @@ class _Resolver(ast.NodeVisitor):
    def _RecordCall(self, node: ast.Call, *, force_dynamic: bool = False) -> None:
       match node.func:
          case ast.Name(id=name, lineno=ln, col_offset=co):
-            call_extra = {"args": len(node.args)}
+            arg_names: list[str | None] = [
+               arg.id if isinstance(arg, ast.Name) else None
+               for arg in node.args
+            ]
+            call_extra = {
+               "args":          len(node.args),
+               "arg_names":     arg_names,
+               "keyword_names": [kw.arg for kw in node.keywords if kw.arg],
+               "has_starargs":  any(isinstance(arg, ast.Starred) for arg in node.args),
+               "has_kwargs":    any(kw.arg is None for kw in node.keywords),
+            }
             self._AddRef(name, RefKind.Call, ln, co, extra=call_extra)
             self._RecordGetattrStringReference(node, name)
             self._CallSites.add((ln, co))

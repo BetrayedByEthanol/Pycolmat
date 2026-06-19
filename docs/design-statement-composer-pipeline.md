@@ -154,11 +154,17 @@ validated call sites without hand-editing the target between rename phases. This
 support must still reject dynamic receivers, external owners, inherited methods,
 and incomplete method plans.
 
-Phase 3C does not claim that the real statementComposer fixture helper-parameter
-pipeline is complete. Inference for typed or call-threaded helper parameters,
-such as proving every private-helper `statementBuilder` parameter is the same
-project-owned builder created by `ComposeStatement`, remains a separate Phase 3D
-design topic.
+Phase 3D adds the read-only bridge for helper-parameter receiver inference:
+when `ComposeStatement` creates a project-owned `StatementBuilder` and passes it
+positionally into project-owned helpers, `customfmt refs` may prove helper calls
+such as `statement_builder.where`, `statement_builder.include`,
+`statement_builder.orderBy`, and `statement_builder.select` as method references.
+This remains proof-first discovery; guarded method rename may use it only when
+existing completeness checks prove the whole plan safe.
+
+The full real statementComposer golden xfail remains in place. Phase 3D does
+not claim the entire statementComposer migration is automatic and does not move
+object/model attribute casing into the method-call bucket.
 
 Object/model attributes remain outside this bucket. `repo.tableName`, `repo.pk`,
 `repo.references`, `repo.model`, `conditions[*].modelType`,
