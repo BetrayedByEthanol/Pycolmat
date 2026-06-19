@@ -5,8 +5,9 @@
 This document designs a Phase 3 rename bucket for conservative method-call and
 object-attribute casing support. Phase 3A implements read-only simple receiver
 method resolution, Phase 3B covers guarded apply for simple proven method calls,
-and Phase 3C adds focused statementComposer-style smoke coverage for the
-method-call bucket. Object-attribute rename remains future work.
+Phase 3C adds focused statementComposer-style smoke coverage for the
+method-call bucket, and Phase 3D adds read-only helper-parameter receiver
+inference. Object-attribute rename remains future work.
 
 The goal is to make future casing migrations possible only when the tool can
 prove the owner of an attribute access. The tool must not make arbitrary textual
@@ -75,6 +76,39 @@ Reassigned receivers, unknown receivers, inherited methods, external classes,
 unresolved. The method-call bucket is intentionally limited to project-owned
 receiver classes whose constructor or annotation can be proven by the project
 reference graph.
+
+### Phase 3D implemented read-only helper-parameter receiver inference
+
+`customfmt refs` can now prove a helper parameter's receiver type when a
+project-owned helper is called with a locally proven receiver. This is a
+read-only project-graph fact first: it classifies references such as
+`statement_builder.where(...)` inside helpers, but it does not add
+object-attribute rename support and does not broaden arbitrary attribute edits.
+
+Supported proof shape:
+
+```python
+class StatementBuilder:
+   def where(self, condition):
+      ...
+
+def ComposeStatement(repo, conditions):
+   statement_builder = StatementBuilder()
+   __BuildConditions(statement_builder, repo, conditions)
+
+def __BuildConditions(statement_builder, repo, conditions):
+   statement_builder.where(conditions[0])
+```
+
+The helper-parameter proof is accepted only when the callee resolves directly to
+a project-owned function, the positional argument has a proven project-owned
+receiver type, the parameter position is unambiguous, every observed call agrees
+on the same receiver type, no `*args` / `**kwargs` / keyword-call ambiguity is
+present, and the target method is declared directly on the inferred class.
+
+Conflicting calls, unknown arguments, dynamic callees, inherited methods,
+external classes, object attributes such as `repo.tableName`, and model or
+condition fields remain dynamic, unresolved, or future work.
 
 ### Supported future method-rename target pattern
 

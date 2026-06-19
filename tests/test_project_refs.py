@@ -1185,3 +1185,319 @@ class TestProjectRefs:
 
       assert rc == 2
       assert "no Python files found" in err
+
+class TestHelperParameterReceiverInference:
+   def TestSameFileHelperParameterReceiverResolvesReadOnly(self, tmp_path):
+      f = Write(
+         tmp_path / "main.py",
+         Src(
+            """
+            class Builder:
+               def where(self):
+                  return self
+
+            def Run():
+               builder = Builder()
+               Helper(builder)
+
+            def Helper(builder):
+               return builder.where()
+            """
+         ),
+      )
+
+      result, _ = FindRefsByName([str(f)], "where")
+      data = result.ToDict()
+      refs = [r for r in data["references"] if r["kind"] == "attribute_call"]
+
+      assert refs
+      assert refs[0]["confidence"] == "local_resolved"
+      assert refs[0]["extra"]["receiver_kind"] == "instance"
+      assert refs[0]["extra"]["owner_class_name"] == "Builder"
+
+   def TestImportedHelperParameterReceiverResolvesReadOnly(self, tmp_path):
+      pkg = Package(tmp_path)
+      Write(
+         pkg / "helpers.py",
+         Src(
+            """
+            def Helper(builder):
+               return builder.where()
+            """
+         ),
+      )
+      builder_file = Write(
+         pkg / "builder.py",
+         Src(
+            """
+            class Builder:
+               def where(self):
+                  return self
+            """
+         ),
+      )
+      Write(
+         pkg / "main.py",
+         Src(
+            """
+            from pkg.builder import Builder
+            from pkg.helpers import Helper
+
+            def Run():
+               builder = Builder()
+               Helper(builder)
+            """
+         ),
+      )
+
+      result, _ = FindRefsByName([str(pkg)], "where")
+      data = result.ToDict()
+      refs = [r for r in data["references"] if r["kind"] == "attribute_call"]
+
+      assert refs
+      assert refs[0]["confidence"] == "import_resolved"
+      assert refs[0]["resolved_to"]["file"] == str(builder_file)
+
+   def TestMultipleSameTypeHelperCallsResolve(self, tmp_path):
+      f = Write(
+         tmp_path / "main.py",
+         Src(
+            """
+            class Builder:
+               def where(self):
+                  return self
+
+            def Run():
+               builder1 = Builder()
+               builder2 = Builder()
+               Helper(builder1)
+               Helper(builder2)
+
+            def Helper(builder):
+               return builder.where()
+            """
+         ),
+      )
+
+      result, _ = FindRefsByName([str(f)], "where")
+      data = result.ToDict()
+      assert [r for r in data["references"] if r["kind"] == "attribute_call"]
+
+   def TestConflictingHelperArgumentTypesBlockResolution(self, tmp_path):
+      f = Write(
+         tmp_path / "main.py",
+         Src(
+            """
+            class Builder:
+               def where(self):
+                  return self
+
+            class Other:
+               def where(self):
+                  return self
+
+            def Run():
+               builder = Builder()
+               other = Other()
+               Helper(builder)
+               Helper(other)
+
+            def Helper(builder):
+               return builder.where()
+            """
+         ),
+      )
+
+      result, _ = FindRefsByName([str(f)], "where")
+      data = result.ToDict()
+      dynamic = [r for r in data["dynamic_references"] if r["kind"] == "attribute_call"]
+      assert dynamic
+
+   def TestUnknownHelperArgumentTypeBlocksResolution(self, tmp_path):
+      f = Write(
+         tmp_path / "main.py",
+         Src(
+            """
+            class Builder:
+               def where(self):
+                  return self
+
+            def Run(builder):
+               Helper(builder)
+
+            def Helper(builder):
+               return builder.where()
+            """
+         ),
+      )
+
+      result, _ = FindRefsByName([str(f)], "where")
+      data = result.ToDict()
+      assert data["dynamic_references"]
+
+   def TestDynamicHelperCalleeBlocksResolution(self, tmp_path):
+      f = Write(
+         tmp_path / "main.py",
+         Src(
+            """
+            class Builder:
+               def where(self):
+                  return self
+
+            def Run(fn):
+               builder = Builder()
+               fn(builder)
+
+            def Helper(builder):
+               return builder.where()
+            """
+         ),
+      )
+
+      result, _ = FindRefsByName([str(f)], "where")
+      data = result.ToDict()
+      assert data["dynamic_references"]
+
+   def TestStarArgsHelperCallBlocksResolution(self, tmp_path):
+      f = Write(
+         tmp_path / "main.py",
+         Src(
+            """
+            class Builder:
+               def where(self):
+                  return self
+
+            def Run(args):
+               Helper(*args)
+
+            def Helper(builder):
+               return builder.where()
+            """
+         ),
+      )
+
+      result, _ = FindRefsByName([str(f)], "where")
+      data = result.ToDict()
+      assert data["dynamic_references"]
+
+   def TestKwargsHelperCallBlocksResolution(self, tmp_path):
+      f = Write(
+         tmp_path / "main.py",
+         Src(
+            """
+            class Builder:
+               def where(self):
+                  return self
+
+            def Run(kwargs):
+               Helper(**kwargs)
+
+            def Helper(builder):
+               return builder.where()
+            """
+         ),
+      )
+
+      result, _ = FindRefsByName([str(f)], "where")
+      data = result.ToDict()
+      assert data["dynamic_references"]
+
+   def TestInheritedHelperParameterMethodRemainsDynamic(self, tmp_path):
+      f = Write(
+         tmp_path / "main.py",
+         Src(
+            """
+            class Base:
+               def where(self):
+                  return self
+
+            class Builder(Base):
+               pass
+
+            def Run():
+               builder = Builder()
+               Helper(builder)
+
+            def Helper(builder):
+               return builder.where()
+            """
+         ),
+      )
+
+      result, _ = FindRefsByName([str(f)], "where")
+      data = result.ToDict()
+      assert data["dynamic_references"]
+
+   def TestExternalHelperParameterClassRemainsDynamic(self, tmp_path):
+      f = Write(
+         tmp_path / "main.py",
+         Src(
+            """
+            from external.builder import Builder
+
+            def Run():
+               builder = Builder()
+               Helper(builder)
+
+            def Helper(builder):
+               return builder.where()
+            """
+         ),
+      )
+
+      result, _ = FindRefsByName([str(f)], "where")
+      data = result.ToDict()
+      assert data["dynamic_references"]
+
+   def TestStatementComposerHelperParameterSmoke(self, tmp_path):
+      f = Write(
+         tmp_path / "statement_composer.py",
+         Src(
+            """
+            class StatementBuilder:
+               def where(self, value):
+                  return self
+               def include(self, value):
+                  return self
+               def orderBy(self, value):
+                  return self
+               def select(self, value):
+                  return self
+
+            def ComposeStatement(repo, conditions):
+               statement_builder = StatementBuilder()
+               __BuildConditions(statement_builder, repo, conditions)
+               __ChainConditions(statement_builder, repo, conditions)
+               __AddSelectsFromTargetTable(statement_builder, repo)
+               __AddJoinedTables(statement_builder, repo)
+               return statement_builder
+
+            def __BuildConditions(statement_builder, repo, conditions):
+               statement_builder.where(conditions[0].field)
+               repo.tableName
+
+            def __ChainConditions(statement_builder, repo, conditions):
+               statement_builder.orderBy(repo.pk)
+               conditions[0].model
+
+            def __AddSelectsFromTargetTable(statement_builder, repo):
+               statement_builder.select(repo.model)
+
+            def __AddJoinedTables(statement_builder, repo):
+               statement_builder.include(repo.references)
+            """
+         ),
+      )
+
+      for name in ["where", "include", "orderBy", "select"]:
+         result, _ = FindRefsByName([str(f)], name)
+         data = result.ToDict()
+         refs = [r for r in data["references"] if r["kind"] == "attribute_call"]
+         assert refs
+         assert refs[0]["confidence"] == "local_resolved"
+         assert refs[0]["extra"]["owner_class_name"] == "StatementBuilder"
+
+      for name in ["tableName", "pk", "model", "references", "field"]:
+         result, _ = FindRefsByName([str(f)], name)
+         data = result.ToDict()
+         assert not data["references"]
