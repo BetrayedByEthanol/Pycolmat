@@ -1186,6 +1186,218 @@ class TestProjectRefs:
       assert rc == 2
       assert "no Python files found" in err
 
+class TestObjectAttributeRefs:
+   def TestSameFileClassAttributeReadResolvesReadOnly(self, tmp_path):
+      f = Write(
+         tmp_path / "main.py",
+         Src(
+            """
+            class Repo:
+               tableName = "x"
+
+            def Run():
+               repo = Repo()
+               return repo.tableName
+            """
+         ),
+      )
+
+      result, _ = FindRefsByName([str(f)], "tableName")
+      data = result.ToDict()
+      refs = [r for r in data["references"] if r["kind"] == "attribute_call"]
+
+      assert refs
+      assert refs[0]["confidence"] == "local_resolved"
+      assert refs[0]["resolved_to"]["kind"] == "class_declaration"
+      assert refs[0]["extra"]["receiver_kind"] == "instance"
+      assert refs[0]["extra"]["attribute_access_kind"] == "read"
+      assert refs[0]["extra"]["owner_class_name"] == "Repo"
+
+   def TestSameFileClassAttributeWriteResolvesReadOnly(self, tmp_path):
+      f = Write(
+         tmp_path / "main.py",
+         Src(
+            """
+            class Repo:
+               tableName = "x"
+
+            def Run():
+               repo = Repo()
+               repo.tableName = "y"
+            """
+         ),
+      )
+
+      result, _ = FindRefsByName([str(f)], "tableName")
+      data = result.ToDict()
+      refs = [r for r in data["references"] if r["kind"] == "attribute_call"]
+
+      assert refs
+      assert refs[0]["confidence"] == "local_resolved"
+      assert refs[0]["extra"]["attribute_access_kind"] == "write"
+
+   def TestImportedClassAttributeReadResolvesReadOnly(self, tmp_path):
+      pkg = Package(tmp_path)
+      repo_file = Write(pkg / "repos.py", "class Repo:\n   tableName = \"x\"\n")
+      Write(
+         pkg / "main.py",
+         Src(
+            """
+            from pkg.repos import Repo
+
+            def Run():
+               repo = Repo()
+               return repo.tableName
+            """
+         ),
+      )
+
+      result, _ = FindRefsByName([str(pkg)], "tableName")
+      data = result.ToDict()
+      refs = [r for r in data["references"] if r["kind"] == "attribute_call"]
+
+      assert refs
+      assert refs[0]["confidence"] == "import_resolved"
+      assert refs[0]["resolved_to"]["file"] == str(repo_file)
+
+   def TestAnnotatedClassAttributeReadResolvesReadOnly(self, tmp_path):
+      f = Write(
+         tmp_path / "main.py",
+         Src(
+            """
+            class Repo:
+               tableName = "x"
+
+            def Run():
+               repo: Repo
+               return repo.tableName
+            """
+         ),
+      )
+
+      result, _ = FindRefsByName([str(f)], "tableName")
+      data = result.ToDict()
+      refs = [r for r in data["references"] if r["kind"] == "attribute_call"]
+
+      assert refs
+      assert refs[0]["confidence"] == "local_resolved"
+
+   def TestUnknownObjectAttributeReceiverRemainsDynamic(self, tmp_path):
+      f = Write(tmp_path / "main.py", "def Run(repo):\n   return repo.tableName\n")
+
+      result, _ = FindRefsByName([str(f)], "tableName")
+      data = result.ToDict()
+
+      assert data["dynamic_references"]
+      assert data["dynamic_references"][0]["confidence"] == "dynamic"
+
+   def TestExternalObjectAttributeClassRemainsDynamic(self, tmp_path):
+      f = Write(
+         tmp_path / "main.py",
+         Src(
+            """
+            from external.pkg import Repo
+
+            def Run():
+               repo = Repo()
+               return repo.tableName
+            """
+         ),
+      )
+
+      result, _ = FindRefsByName([str(f)], "tableName")
+      data = result.ToDict()
+
+      assert data["dynamic_references"]
+      assert data["dynamic_references"][0]["confidence"] == "dynamic"
+
+   def TestInheritedObjectAttributeRemainsDynamic(self, tmp_path):
+      f = Write(
+         tmp_path / "main.py",
+         Src(
+            """
+            class Base:
+               tableName = "x"
+
+            class Repo(Base):
+               pass
+
+            def Run():
+               repo = Repo()
+               return repo.tableName
+            """
+         ),
+      )
+
+      result, _ = FindRefsByName([str(f)], "tableName")
+      data = result.ToDict()
+      dynamic = [r for r in data["dynamic_references"] if r["kind"] == "attribute_call"]
+
+      assert dynamic
+
+   def TestDynamicAttributeHelpersRemainDynamic(self, tmp_path):
+      f = Write(
+         tmp_path / "main.py",
+         Src(
+            """
+            class Repo:
+               tableName = "x"
+
+            def Run():
+               repo = Repo()
+               getattr(repo, "tableName")
+               setattr(repo, "tableName", "y")
+               hasattr(repo, "tableName")
+            """
+         ),
+      )
+
+      result, _ = FindRefsByName([str(f)], "tableName")
+      data = result.ToDict()
+      reasons = {
+         r["extra"].get("dynamic_reason")
+         for r in data["dynamic_references"]
+      }
+
+      assert {"getattr_string", "setattr_string", "hasattr_string"} <= reasons
+
+   def TestDictObjectAttributeAccessRemainsDynamic(self, tmp_path):
+      f = Write(
+         tmp_path / "main.py",
+         Src(
+            """
+            class Repo:
+               tableName = "x"
+
+            def Run():
+               repo = Repo()
+               return repo.__dict__["tableName"]
+            """
+         ),
+      )
+
+      result, _ = FindRefsByName([str(f)], "tableName")
+      data = result.ToDict()
+
+      assert not [r for r in data["references"] if r["kind"] == "attribute_call"]
+
+   def TestStatementComposerStyleAttributeRemainsUnresolvedWithoutDeclaration(self, tmp_path):
+      f = Write(
+         tmp_path / "main.py",
+         Src(
+            """
+            def Run(repo):
+               return repo.tableName
+            """
+         ),
+      )
+
+      result, _ = FindRefsByName([str(f)], "tableName")
+      data = result.ToDict()
+
+      assert data["dynamic_references"]
+      assert data["dynamic_references"][0]["resolved_to"] is None
+
 class TestHelperParameterReceiverInference:
    def TestSameFileHelperParameterReceiverResolvesReadOnly(self, tmp_path):
       f = Write(
@@ -1497,7 +1709,12 @@ class TestHelperParameterReceiverInference:
          assert refs[0]["confidence"] == "local_resolved"
          assert refs[0]["extra"]["owner_class_name"] == "StatementBuilder"
 
-      for name in ["tableName", "pk", "model", "references", "field"]:
+      for name in ["tableName", "pk", "model", "references"]:
          result, _ = FindRefsByName([str(f)], name)
          data = result.ToDict()
-         assert not data["references"]
+         assert data["dynamic_references"]
+         assert data["dynamic_references"][0]["resolved_to"] is None
+
+      result, _ = FindRefsByName([str(f)], "field")
+      data = result.ToDict()
+      assert not data["references"]

@@ -306,6 +306,16 @@ class _Resolver(ast.NodeVisitor):
          case ast.Subscript(value=value, slice=slice_node):
             self._WalkExprForRefs(value)
             self._WalkExprForRefs(slice_node)
+         case ast.Attribute(attr=attr, value=ast.Name(id=receiver), lineno=ln, col_offset=co):
+            self._AddRef(
+               attr, RefKind.AttrCall, ln, co,
+               dynamic=True,
+               extra={
+                  "full":                  f"{receiver}.{attr}",
+                  "receiver_name":         receiver,
+                  "attribute_access_kind": "write",
+               },
+            )
          case ast.Attribute(value=value):
             self._WalkExprForRefs(value)
          case _:
@@ -592,12 +602,31 @@ class _Resolver(ast.NodeVisitor):
       if node is None:
          return
       lambda_attr_calls = self._LambdaAttributeCallPositions(node)
+      call_positions: set[tuple[int, int]] = set()
+      for child in ast.walk(node):
+         if isinstance(child, ast.Call):
+            call_positions.add(self._CallPosition(child))
       for child in ast.walk(node):
          if isinstance(child, ast.Call):
             self._RecordCall(
                child,
                force_dynamic=self._CallPosition(child) in lambda_attr_calls,
             )
+         elif isinstance(child, ast.Attribute):
+            pos = (child.lineno, child.col_offset)
+            if pos in call_positions:
+               continue
+            if isinstance(child.value, ast.Name) and isinstance(child.ctx, ast.Load):
+               self._AddRef(
+                  child.attr, RefKind.AttrCall,
+                  child.lineno, child.col_offset,
+                  dynamic=True,
+                  extra={
+                     "full":                  ast.unparse(child),
+                     "receiver_name":         child.value.id,
+                     "attribute_access_kind": "read",
+                  },
+               )
          elif isinstance(child, ast.Name) and isinstance(child.ctx, ast.Load):
             pos = (child.lineno, child.col_offset)
             if pos not in self._CallSites:
@@ -677,7 +706,7 @@ class _Resolver(ast.NodeVisitor):
 
 
    def _RecordGetattrStringReference(self, node: ast.Call, name: str) -> None:
-      if name != "getattr" or len(node.args) < 2:
+      if name not in ("getattr", "setattr", "hasattr") or len(node.args) < 2:
          return
       attr_arg = node.args[1]
       if not isinstance(attr_arg, ast.Constant):
@@ -691,7 +720,7 @@ class _Resolver(ast.NodeVisitor):
          attr_name, RefKind.AttrCall,
          attr_arg.lineno, attr_arg.col_offset + 1,
          dynamic=True,
-         extra={"full": ast.unparse(node), "dynamic_reason": "getattr_string"},
+         extra={"full": ast.unparse(node), "dynamic_reason": f"{name}_string"},
       )
 
    def _RecordTarget(self, target: ast.expr, kind: DefKind) -> None:
