@@ -96,6 +96,7 @@ class RefsResult:
    References           : list[ProjectReference]  = field(default_factory=list)
    UnresolvedReferences : list[ProjectReference]  = field(default_factory=list)
    DynamicReferences    : list[ProjectReference]  = field(default_factory=list)
+   ObjectAttributePlan  : dict                    = field(default_factory=dict)
    Errors               : list[FileError]         = field(default_factory=list)
 
    def ToDict(self) -> dict:
@@ -105,6 +106,7 @@ class RefsResult:
          "references":            [r.ToDict() for r in self.References],
          "unresolved_references":  [r.ToDict() for r in self.UnresolvedReferences],
          "dynamic_references":     [r.ToDict() for r in self.DynamicReferences],
+         "object_attribute_plan":   self.ObjectAttributePlan,
          "errors":                [e.ToDict() for e in self.Errors],
          "summary": {
             "definitions":          len(self.Definitions),
@@ -242,6 +244,7 @@ class ProjectGraph:
                target_locs.add(self._ProjectDefLocation(target))
 
       self._AddTargetDefinitions(output, target_locs)
+      self._AddObjectAttributePlan(output, name)
       return output
 
    def FindBySymbol(self, symbol: str) -> RefsResult:
@@ -284,7 +287,105 @@ class ProjectGraph:
             if project_ref.Confidence in (CONF_UNRESOLVED, CONF_DYNAMIC):
                self._AppendReference(output, project_ref)
 
+      self._AddObjectAttributePlan(output, selected_name)
       return output
+
+   def _AddObjectAttributePlan(self, output: RefsResult, name: str) -> None:
+      """Add read-only object-attribute completeness diagnostics."""
+      if not name:
+         return
+      attr_defs = [
+         d for d in output.Definitions
+         if d.Kind == DefKind.ClassDecl.value and d.Name == name
+      ]
+      attr_refs = [
+         r for r in output.References
+         if r.Kind == "attribute_call" and r.Name == name
+      ]
+      read_refs = [
+         r for r in attr_refs
+         if r.Extra.get("attribute_access_kind") == "read"
+      ]
+      write_refs = [
+         r for r in attr_refs
+         if r.Extra.get("attribute_access_kind") == "write"
+      ]
+      dynamic_refs = [
+         r for r in output.DynamicReferences
+         if r.Kind == "attribute_call" and r.Name == name
+      ]
+      unresolved_refs = [
+         r for r in output.UnresolvedReferences
+         if r.Kind == "attribute_call" and r.Name == name
+      ]
+      external_refs = [
+         r for r in dynamic_refs
+         if self._ObjectAttributeBlockReason(r) == "external_owner"
+      ]
+      owners = {
+         (
+            str(Path(r.ResolvedTo.FilePath).resolve()),
+            r.ResolvedTo.Line,
+            r.ResolvedTo.Col,
+         )
+         for r in attr_refs
+         if r.ResolvedTo is not None and r.ResolvedTo.Kind == DefKind.ClassDecl.value
+      }
+      block_reasons: list[str] = []
+      if not attr_defs:
+         block_reasons.append("missing_declaration")
+      if not attr_refs and not dynamic_refs and not unresolved_refs:
+         block_reasons.append("no_attribute_references")
+      if len(owners) > 1:
+         block_reasons.append("multiple_candidate_owners")
+      for ref in dynamic_refs:
+         reason = self._ObjectAttributeBlockReason(ref)
+         if reason and reason not in block_reasons:
+            block_reasons.append(reason)
+      if unresolved_refs and "unresolved_refs" not in block_reasons:
+         block_reasons.append("unresolved_refs")
+      complete = bool(attr_defs) and bool(attr_refs) and not block_reasons
+      output.ObjectAttributePlan = {
+         "kind":                 "object_attribute_read_only",
+         "name":                 name,
+         "declaration_found":    bool(attr_defs),
+         "complete":             complete,
+         "apply_allowed":        False,
+         "resolved_read_refs":   [r.ToDict() for r in read_refs],
+         "resolved_write_refs":  [r.ToDict() for r in write_refs],
+         "dynamic_refs":         [r.ToDict() for r in dynamic_refs],
+         "unresolved_refs":      [r.ToDict() for r in unresolved_refs],
+         "external_refs":        [r.ToDict() for r in external_refs],
+         "blocked":              not complete,
+         "blocked_reasons":      block_reasons,
+         "future_mode_owner":    "future_mode_owner" in block_reasons,
+      }
+
+   def _ObjectAttributeBlockReason(self, project_ref: ProjectReference) -> str:
+      if project_ref.Extra.get("dynamic_reason") in (
+         "getattr_string", "setattr_string", "hasattr_string",
+      ):
+         return "dynamic_attribute_helper"
+      ref = self._FindReferenceAt(project_ref.FilePath, project_ref.Line, project_ref.Col)
+      if ref is None:
+         return ""
+      receiver = ref.Extra.get("receiver_name")
+      if not isinstance(receiver, str) or not receiver:
+         return ""
+      type_name = self._ReceiverTypeName(ref, receiver)
+      if type_name is None:
+         return "unknown_receiver"
+      class_target = self._ResolveSimpleClassName(ref, type_name)
+      if class_target is None:
+         return "external_owner"
+      if self._ClassAttributeOwnerIsFutureMode(class_target.OwnerClass):
+         return "future_mode_owner"
+      direct = self._DirectClassAttributeForClass(class_target.OwnerClass, ref.Name)
+      if direct is not None:
+         return ""
+      if self._InheritedClassAttributeForClass(class_target.OwnerClass, ref.Name):
+         return "inherited_attribute"
+      return "missing_declaration"
 
    # -----------------------------------------------------------------------
    # Reference projection
@@ -752,6 +853,29 @@ class ProjectGraph:
          if defn.ScopeRef.Col != class_def.Col:
             continue
          return defn
+      return None
+
+   def _InheritedClassAttributeForClass(
+      self, class_def: Definition, attr_name: str
+   ) -> Definition | None:
+      base_names = [
+         item.rsplit(".", 1)[-1]
+         for item in class_def.Extra.get("bases", [])
+         if isinstance(item, str)
+      ]
+      if not base_names:
+         return None
+      owner_file = class_def.ScopeRef.FilePath
+      base_defs = [
+         defn for defn in self._AllDefinitions()
+         if defn.Kind == DefKind.ClassDef
+         and defn.Name in base_names
+         and _SamePath(defn.ScopeRef.FilePath, owner_file)
+      ]
+      for base_def in base_defs:
+         attr = self._DirectClassAttributeForClass(base_def, attr_name)
+         if attr is not None:
+            return attr
       return None
 
    def _ClassAttributeOwnerIsFutureMode(self, class_def: Definition) -> bool:

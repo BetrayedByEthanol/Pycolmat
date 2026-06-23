@@ -210,6 +210,37 @@ declaration remain dynamic, unresolved, blocked, or future work. Phase 4A is
 read-only discovery only; it does not add `rename-attribute`, does not broaden
 `customfmt rename`, and does not enable apply behavior for object attributes.
 
+### Phase 4C implemented read-only completeness reporting
+
+Phase 4C keeps object-attribute work read-only, but adds completeness
+diagnostics to `customfmt refs` output for attribute-name lookups. The report is
+not a rename plan and cannot write files. It answers whether a later
+object-attribute rename could be complete with the evidence currently available.
+
+The diagnostic reports:
+
+* whether a direct class-body declaration was found;
+* resolved read references;
+* resolved write references;
+* dynamic references;
+* unresolved references;
+* external references;
+* blocked/future-mode owner status; and
+* `apply_allowed: false`.
+
+A same-file or imported class attribute with a proven direct declaration and
+only resolved reads/writes can be reported complete for read-only planning.
+Apply remains disabled. Unknown receivers, dynamic
+`getattr`/`setattr`/`hasattr`, `__dict__`, future-mode owners, inherited
+attributes, multiple candidate owners, and missing declarations are reported as
+blocked or incomplete.
+
+The statementComposer-style `repo.tableName` shape remains incomplete unless a
+fixture proves the receiver class and direct attribute declaration. Phase 4C
+does not add `rename-attribute`, does not add object-attribute apply, does not
+broaden local `customfmt rename`, and does not remove the strict
+statementComposer golden xfail.
+
 
 ### Phase 4B guarded apply boundary design
 
