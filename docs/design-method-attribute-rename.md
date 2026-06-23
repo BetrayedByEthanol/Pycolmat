@@ -6,9 +6,10 @@ This document designs conservative rename buckets for method-call and
 object-attribute casing support. Phase 3A implements read-only simple receiver
 method resolution, Phase 3B covers guarded apply for simple proven method calls,
 Phase 3C adds focused statementComposer-style smoke coverage for the
-method-call bucket, and Phase 3D adds read-only helper-parameter receiver
-inference. Phase 4 is a design-only bucket for future conservative
-object-attribute rename support. Object-attribute rename remains future work.
+method-call bucket, Phase 3D adds read-only helper-parameter receiver
+inference, and Phase 4A adds read-only discovery for simple project-owned
+object-attribute references. Apply behavior and object-attribute rename remain
+future work.
 
 The goal is to make future casing migrations possible only when the tool can
 prove the owner of an attribute access. The tool must not make arbitrary textual
@@ -19,7 +20,7 @@ replacements, must not guess from receiver names, and must not treat every
 
 * Simple proven method-call apply is covered by guarded method apply only for
   proven project-owned receiver types.
-* No object-attribute rename behavior.
+* No object-attribute apply or rename behavior.
 * No test xfail removal.
 * No broadening of `customfmt rename`.
 * No arbitrary search-and-replace for attribute text.
@@ -108,8 +109,9 @@ on the same receiver type, no `*args` / `**kwargs` / keyword-call ambiguity is
 present, and the target method is declared directly on the inferred class.
 
 Conflicting calls, unknown arguments, dynamic callees, inherited methods,
-external classes, object attributes such as `repo.tableName`, and model or
-condition fields remain dynamic, unresolved, or future work.
+external classes, and unproven model or condition fields remain dynamic,
+unresolved, or future work. Simple object attributes are handled only by the
+read-only Phase 4A discovery described below when ownership is proven.
 
 ### Supported future method-rename target pattern
 
@@ -168,6 +170,44 @@ variables and the already-designed conservative private-helper parameter casing
 bucket.
 
 ## Track B: Phase 4 object-attribute rename support
+
+### Phase 4A implemented read-only simple class-attribute discovery
+
+`customfmt refs` can now classify simple object-attribute reads and writes as
+resolved when all of these facts are proven without writing files:
+
+1. The receiver variable has exactly one direct constructor assignment or bare
+   annotation in the local scope.
+2. The receiver class resolves to a project-owned class, including supported
+   project imports.
+3. The attribute is declared directly in that class body.
+4. The reference is a simple `receiver.attribute` read or assignment target.
+
+Examples now supported read-only:
+
+```python
+class Repo:
+   tableName = "x"
+
+def Run():
+   repo = Repo()
+   return repo.tableName
+```
+
+```python
+from pkg.repos import Repo
+
+def Run():
+   repo: Repo
+   repo.tableName = "x"
+```
+
+Unknown receivers, external classes, inherited attributes, `getattr`, `setattr`,
+`hasattr`, `__dict__` access, dataclass/Pydantic/ORM/model fields, string
+references, and statementComposer-style `repo.tableName` without a proven
+declaration remain dynamic, unresolved, blocked, or future work. Phase 4A is
+read-only discovery only; it does not add `rename-attribute`, does not broaden
+`customfmt rename`, and does not enable apply behavior for object attributes.
 
 ### Supported future object-attribute target pattern
 

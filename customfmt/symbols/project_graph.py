@@ -146,6 +146,15 @@ class _ClassMethodTarget:
    Reason     : str        = ""
 
 
+@dataclass
+class _ClassAttributeTarget:
+   Confidence : str
+   Attribute  : Definition
+   OwnerClass : Definition
+   Module     : str        = ""
+   Reason     : str        = ""
+
+
 class ProjectGraph:
    """Conservative project-level graph for read-only reference lookup."""
 
@@ -287,53 +296,84 @@ class ProjectGraph:
       extra = dict(ref.Extra)
 
       if ref.IsDynamic:
-         class_method_target = self._ResolveDynamicReceiverMethodAttribute(ref)
-         if class_method_target is None:
-            class_method_target = self._ResolveDynamicClassMethodAttribute(ref)
-         if class_method_target is not None:
-            confidence = class_method_target.Confidence
+         class_attr_target = self._ResolveDynamicReceiverClassAttribute(ref)
+         if class_attr_target is not None:
+            confidence = class_attr_target.Confidence
             target = self._ProjectDefinition(
-               class_method_target.Method,
+               class_attr_target.Attribute,
                confidence=confidence,
             )
             extra = {
                **extra,
-               "receiver_kind":              (
-                  "instance"
-                  if class_method_target.Reason == "receiver_type_found"
-                  else "class"
-               ),
-               "owner_class_name":           class_method_target.OwnerClass.Name,
+               "receiver_kind":              "instance",
+               "owner_class_name":           class_attr_target.OwnerClass.Name,
                "owner_class_qualified_name": self._ClassQualifiedName(
-                  class_method_target.OwnerClass
+                  class_attr_target.OwnerClass
                ),
-               "method_name":                ref.Name,
-               "method_target":              self._MethodTargetDict(
-                  class_method_target.Method,
+               "attribute_name":             ref.Name,
+               "attribute_target":           self._MethodTargetDict(
+                  class_attr_target.Attribute,
                   confidence=confidence,
                ),
             }
-            if class_method_target.Module:
+            if class_attr_target.Module:
                extra["import_target"] = {
-                  "confidence": class_method_target.Confidence,
-                  "module":     class_method_target.Module,
-                  "reason":     class_method_target.Reason,
+                  "confidence": class_attr_target.Confidence,
+                  "module":     class_attr_target.Module,
+                  "reason":     class_attr_target.Reason,
                   "definition": self._ProjectDefinition(
-                     class_method_target.OwnerClass,
-                     confidence=class_method_target.Confidence,
+                     class_attr_target.OwnerClass,
+                     confidence=class_attr_target.Confidence,
                   ).ToDict(),
                }
          else:
-            import_target = self._ResolveDynamicImportAttribute(ref)
-            if import_target is not None and import_target.Target is not None:
-               extra["import_target"] = self._ImportTargetDict(import_target)
-               confidence = CONF_IMPORT_RESOLVED
+            class_method_target = self._ResolveDynamicReceiverMethodAttribute(ref)
+            if class_method_target is None:
+               class_method_target = self._ResolveDynamicClassMethodAttribute(ref)
+            if class_method_target is not None:
+               confidence = class_method_target.Confidence
                target = self._ProjectDefinition(
-                  import_target.Target,
-                  confidence=CONF_IMPORT_RESOLVED,
+                  class_method_target.Method,
+                  confidence=confidence,
                )
+               extra = {
+                  **extra,
+                  "receiver_kind":              (
+                     "instance"
+                     if class_method_target.Reason == "receiver_type_found"
+                     else "class"
+                  ),
+                  "owner_class_name":           class_method_target.OwnerClass.Name,
+                  "owner_class_qualified_name": self._ClassQualifiedName(
+                     class_method_target.OwnerClass
+                  ),
+                  "method_name":                ref.Name,
+                  "method_target":              self._MethodTargetDict(
+                     class_method_target.Method,
+                     confidence=confidence,
+                  ),
+               }
+               if class_method_target.Module:
+                  extra["import_target"] = {
+                     "confidence": class_method_target.Confidence,
+                     "module":     class_method_target.Module,
+                     "reason":     class_method_target.Reason,
+                     "definition": self._ProjectDefinition(
+                        class_method_target.OwnerClass,
+                        confidence=class_method_target.Confidence,
+                     ).ToDict(),
+                  }
             else:
-               confidence = CONF_DYNAMIC
+               import_target = self._ResolveDynamicImportAttribute(ref)
+               if import_target is not None and import_target.Target is not None:
+                  extra["import_target"] = self._ImportTargetDict(import_target)
+                  confidence = CONF_IMPORT_RESOLVED
+                  target = self._ProjectDefinition(
+                     import_target.Target,
+                     confidence=CONF_IMPORT_RESOLVED,
+                  )
+               else:
+                  confidence = CONF_DYNAMIC
       elif ref.ResolvedTo is not None:
          defn = ref.ResolvedTo
          if defn.Kind in (DefKind.Import, DefKind.ImportFrom):
@@ -421,6 +461,35 @@ class ProjectGraph:
    # -----------------------------------------------------------------------
 
 
+
+
+   def _ResolveDynamicReceiverClassAttribute(
+      self, ref: Reference
+   ) -> _ClassAttributeTarget | None:
+      if ref.Kind.value != "attribute_call":
+         return None
+      access_kind = ref.Extra.get("attribute_access_kind")
+      if access_kind not in ("read", "write"):
+         return None
+      receiver = ref.Extra.get("receiver_name")
+      if not isinstance(receiver, str) or not receiver:
+         return None
+      type_name = self._ReceiverTypeName(ref, receiver)
+      if type_name is None:
+         return None
+      class_target = self._ResolveSimpleClassName(ref, type_name)
+      if class_target is None:
+         return None
+      attr = self._DirectClassAttributeForClass(class_target.OwnerClass, ref.Name)
+      if attr is None:
+         return None
+      return _ClassAttributeTarget(
+         Confidence = class_target.Confidence,
+         Attribute  = attr,
+         OwnerClass = class_target.OwnerClass,
+         Module     = class_target.Module,
+         Reason     = "receiver_type_found",
+      )
 
    def _ResolveDynamicReceiverMethodAttribute(
       self, ref: Reference
@@ -666,6 +735,22 @@ class ProjectGraph:
          Module     = import_target.Module,
          Reason     = "module_class_found",
       )
+
+
+   def _DirectClassAttributeForClass(
+      self, class_def: Definition, attr_name: str
+   ) -> Definition | None:
+      for defn in self._AllDefinitions():
+         if defn.Kind != DefKind.ClassDecl or defn.Name != attr_name:
+            continue
+         if not _SamePath(defn.ScopeRef.FilePath, class_def.ScopeRef.FilePath):
+            continue
+         if defn.ScopeRef.Line != class_def.Line:
+            continue
+         if defn.ScopeRef.Col != class_def.Col:
+            continue
+         return defn
+      return None
 
    def _DirectMethodForClass(
       self, class_def: Definition, method_name: str

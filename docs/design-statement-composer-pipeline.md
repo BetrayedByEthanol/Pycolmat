@@ -179,8 +179,11 @@ changed by the method-call pipeline. They must not be smuggled into
 
 ### Phase 4 object-attribute rename design
 
-Phase 4 is design-only. It does not implement behavior, does not modify resolver
-behavior, and does not remove the strict statementComposer golden xfail.
+Phase 4A implements read-only discovery for simple project-owned class-attribute
+references when the receiver type and direct class-body declaration are proven.
+It does not implement apply behavior, does not add `rename-attribute`, does not
+broaden local `customfmt rename`, and does not remove the strict
+statementComposer golden xfail.
 
 A future object-attribute planner may consider repository metadata migrations
 such as `repo.tableName` -> `repo.TableName`, `repo.pk` -> `repo.Pk`,
@@ -212,9 +215,9 @@ For the statementComposer fixture specifically, `repo.tableName`, `repo.pk`,
 ownership before any automated casing migration. `conditions[*].modelType`,
 `conditions[*].fieldName`, `conditions[*].operation`,
 `conditions[*].condition`, and `previous_condition.nextCondition` are
-model/property migrations and remain manual unless declarations are proven. The
-`closeBreacket` typo/API correction remains manual and outside attribute rename
-support.
+model/property migrations and remain manual unless declarations are proven by a
+specific fixture or a future explicit mode. The `closeBreacket` typo/API
+correction remains manual and outside attribute rename support.
 
 ### Manual/API migration only
 
