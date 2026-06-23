@@ -764,6 +764,8 @@ class ProjectGraph:
          "orm",
       }
       raw_items = [
+         class_def.Name,
+         self._ClassQualifiedName(class_def),
          *class_def.Extra.get("bases", []),
          *class_def.Extra.get("decorators", []),
       ]
