@@ -441,3 +441,77 @@ class TestStabilizationCliSmoke:
          "def BuildValue():\n"
          "   return AccountModel()\n"
       )
+
+
+class TestRenameAttributeSkeletonCli:
+   def WriteRepoProject(self, tmp_path):
+      src = (
+         "class Repo:\n"
+         "   tableName = \"x\"\n"
+         "\n"
+         "def Run():\n"
+         "   repo = Repo()\n"
+         "   return repo.tableName\n"
+      )
+      return Write(tmp_path / "repo.py", src)
+
+   def TestRejectsMissingClass(self, tmp_path, capsys):
+      f = self.WriteRepoProject(tmp_path)
+
+      rc = Run("rename-attribute", str(f), "--name", "tableName", "--to", "TableName", "--diff")
+
+      err = capsys.readouterr().err
+      assert rc == 2
+      assert "rename-attribute requires --class" in err
+
+   def TestRejectsMissingNameAndTo(self, tmp_path, capsys):
+      f = self.WriteRepoProject(tmp_path)
+
+      rc = Run("rename-attribute", str(f), "--class", "Repo", "--diff")
+
+      err = capsys.readouterr().err
+      assert rc == 2
+      assert "rename-attribute requires --name, --to" in err
+
+   def TestReportsDiffNotImplementedAndDoesNotWrite(self, tmp_path, capsys):
+      f = self.WriteRepoProject(tmp_path)
+      original = f.read_text(encoding="utf-8")
+
+      rc = Run(
+         "rename-attribute",
+         str(f),
+         "--class",
+         "Repo",
+         "--name",
+         "tableName",
+         "--to",
+         "TableName",
+         "--diff",
+      )
+
+      err = capsys.readouterr().err
+      assert rc == 2
+      assert "rename-attribute --diff is not implemented yet" in err
+      assert "future diff planning must prove declaration" in err
+      assert f.read_text(encoding="utf-8") == original
+
+   def TestRejectsApplyAndDoesNotWrite(self, tmp_path, capsys):
+      f = self.WriteRepoProject(tmp_path)
+      original = f.read_text(encoding="utf-8")
+
+      rc = Run(
+         "rename-attribute",
+         str(f),
+         "--class",
+         "Repo",
+         "--name",
+         "tableName",
+         "--to",
+         "TableName",
+         "--apply",
+      )
+
+      err = capsys.readouterr().err
+      assert rc == 2
+      assert "rename-attribute apply is not implemented" in err
+      assert f.read_text(encoding="utf-8") == original

@@ -460,3 +460,71 @@ serialization or framework implications are explicitly handled.
 
 The `closeBreacket` typo/API correction remains manual. It is not an object
 attribute rename, and it must not be inferred from casing rules.
+
+
+### Phase 4E rename-attribute diff-only skeleton
+
+Phase 4E introduces the CLI shape for future object-attribute diff planning,
+but it still does not implement token edits, apply behavior, or file writes.
+The preferred command is:
+
+```bash
+customfmt rename-attribute <root> --class Repo --name tableName --to TableName --diff
+```
+
+The command must require all of these explicit inputs before any planning can
+begin:
+
+* `--class Repo` for the proven owner class.
+* `--name tableName` for the old attribute spelling.
+* `--to TableName` for the new attribute spelling.
+* `--diff` because Phase 4E is diff-only design/skeleton work.
+
+Apply remains intentionally unsupported. `rename-attribute --apply` must refuse
+with exit code 2 and write nothing. The command must not call the local
+`customfmt rename` planner, must not broaden `rename-symbol`, and must not use
+text replacement.
+
+#### Diff eligibility contract
+
+A future `rename-attribute --diff` implementation may render a unified diff
+only after project-wide diagnostics prove one complete token plan:
+
+1. The declaration is found on the explicit owner class.
+2. All reads and writes are resolved to that declaration.
+3. There are no dynamic references.
+4. There are no unresolved references.
+5. There are no external references.
+6. The owner is not a future-mode owner such as dataclass, Pydantic, SQLModel,
+   ORM, generated, reflected, serialized, or otherwise model-like API state.
+7. The attribute is not inherited unless a later design explicitly supports
+   inherited object attributes.
+8. There is exactly one candidate owner.
+9. The new name does not collide with an existing owner-class declaration.
+
+The diff renderer must use the same validated token plan that a still-later
+apply implementation would use. Diff comes first so users can inspect the
+complete plan before any write-capable mode exists.
+
+#### Phase 4E blockers
+
+The skeleton or future planner must refuse rather than guess when any of these
+facts are present:
+
+* Missing `--class`, `--name`, or `--to`.
+* Unknown receiver.
+* Future-mode owner.
+* Dynamic `getattr`, `setattr`, or `hasattr`.
+* `__dict__` access or mutation.
+* Inherited attribute.
+* Multiple candidate owners.
+* Missing declaration.
+* New-name collision.
+* statementComposer `repo`, `model`, or `condition` fields without proven
+  declarations.
+
+For the statementComposer fixture, repository metadata fields such as
+`repo.tableName`, `repo.pk`, `repo.references`, and `repo.model` remain blocked
+until ownership and declarations are proven. Model and condition fields remain
+manual/API migrations unless a future explicit mode proves declarations and
+serialization behavior. The strict statementComposer golden xfail must remain.

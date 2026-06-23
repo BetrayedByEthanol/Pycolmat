@@ -11,6 +11,7 @@ Commands
   customfmt resolve [--pretty] [--output PATH] <paths...>
   customfmt refs [--name NAME | --symbol PATH:LINE:COL] [--pretty] [--output PATH] <paths...>
   customfmt rename-symbol [--name NAME | --symbol PATH:LINE:COL] --to NAME [--pretty] [--output PATH] [--diff | --apply] [--allow-incomplete] <paths...>
+  customfmt rename-attribute --class CLASS --name NAME --to NAME --diff <paths...>
   customfmt deps [--json | --pretty] [--output PATH] <paths...>
 
 Aliases (console_scripts)
@@ -343,6 +344,51 @@ def _BuildParser(prog: str = "customfmt") -> argparse.ArgumentParser:
          "With --apply only, allow applying safe planned edits even when "
          "the plan contains warnings or skipped/incomplete references."
       ),
+   )
+
+   # -- rename-attribute -----------------------------------------------------
+   attr_p = sub.add_parser(
+      "rename-attribute",
+      help="Validate future object-attribute diff planning arguments.",
+      description=(
+         "Validate the explicit owner class and attribute names for a future "
+         "project-wide object-attribute diff plan. This skeleton does not "
+         "render token edits, apply changes, or write files."
+      ),
+   )
+   attr_p.add_argument(
+      "paths", nargs="+", metavar="PATH", help="Files or directories to inspect."
+   )
+   attr_p.add_argument(
+      "--class",
+      metavar="ClassName",
+      default=None,
+      dest="owner_class",
+      help="Required explicit owner class for the object attribute.",
+   )
+   attr_p.add_argument(
+      "--name",
+      metavar="OldName",
+      default=None,
+      help="Required current attribute name.",
+   )
+   attr_p.add_argument(
+      "--to",
+      metavar="NewName",
+      default=None,
+      dest="new_name",
+      help="Required new attribute name.",
+   )
+   attr_mode = attr_p.add_mutually_exclusive_group()
+   attr_mode.add_argument(
+      "--diff",
+      action="store_true",
+      help="Future diff-only mode; currently validates arguments and exits not implemented.",
+   )
+   attr_mode.add_argument(
+      "--apply",
+      action="store_true",
+      help="Unsupported. Object-attribute apply behavior is not implemented.",
    )
 
    # -- deps -----------------------------------------------------------------
@@ -738,6 +784,48 @@ def _CmdRenameSymbol(args: argparse.Namespace) -> int:
    return 0
 
 
+def _CmdRenameAttribute(args: argparse.Namespace) -> int:
+   missing: list[str] = []
+   if not args.owner_class:
+      missing.append("--class")
+   if not args.name:
+      missing.append("--name")
+   if not args.new_name:
+      missing.append("--to")
+   if missing:
+      print(
+         "customfmt: error: rename-attribute requires "
+         + ", ".join(missing),
+         file=sys.stderr,
+      )
+      return 2
+
+   if args.apply:
+      print(
+         "customfmt: error: rename-attribute apply is not implemented; "
+         "only future diff planning is allowed",
+         file=sys.stderr,
+      )
+      return 2
+
+   if not args.diff:
+      print(
+         "customfmt: error: rename-attribute requires --diff; apply/write behavior "
+         "is not implemented",
+         file=sys.stderr,
+      )
+      return 2
+
+   print(
+      "customfmt: error: rename-attribute --diff is not implemented yet; "
+      "future diff planning must prove declaration, resolved reads/writes, "
+      "no dynamic/unresolved/external refs, no future-mode owner, no inherited "
+      "attrs, no multiple candidate owners, and no new-name collision",
+      file=sys.stderr,
+   )
+   return 2
+
+
 def _WriteRenderedPlanFiles(rendered_by_file: dict[Path, str]) -> None:
    originals = {path: ReadUtf8Text(path) for path in rendered_by_file}
    written: list[Path] = []
@@ -886,6 +974,8 @@ def Main(argv: list[str] | None = None, *, prog: str = "customfmt") -> int:
          return _CmdRefs(args)
       elif args.command == "rename-symbol":
          return _CmdRenameSymbol(args)
+      elif args.command == "rename-attribute":
+         return _CmdRenameAttribute(args)
       elif args.command == "deps":
          return _CmdDeps(args)
       else:  # pragma: no cover

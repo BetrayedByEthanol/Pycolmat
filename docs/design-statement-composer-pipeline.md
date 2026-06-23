@@ -193,6 +193,21 @@ apply behavior, do not add `rename-attribute`, do not add
 `rename-symbol --attribute`, do not broaden local `customfmt rename`, and do not
 remove the strict statementComposer golden xfail.
 
+Phase 4E adds only the future command skeleton for diff planning:
+
+```bash
+customfmt rename-attribute <root> --class Repo --name tableName --to TableName --diff
+```
+
+The skeleton validates that `--class`, `--name`, and `--to` are explicit and
+refuses apply/write behavior. A later diff implementation must prove a complete
+project-wide object-attribute plan before rendering any diff: declaration found
+on the explicit owner class, all reads and writes resolved, no dynamic refs, no
+unresolved refs, no external refs, no future-mode owner, no inherited attrs, no
+multiple candidate owners, and no collision with the new name. Diff-only support
+must land before any apply mode so the project can review the exact token plan
+without writing files.
+
 A future object-attribute planner may consider repository metadata migrations
 such as `repo.tableName` -> `repo.TableName`, `repo.pk` -> `repo.Pk`,
 `repo.references` -> `repo.References`, and `repo.model` -> `repo.Model` only
@@ -216,6 +231,12 @@ read-only completeness diagnostics before write support: the tool must first
 show that repository attributes have proven owner classes, direct declarations,
 and complete read/write coverage, while leaving StatementComposer repository
 attributes incomplete when those facts are absent.
+
+StatementComposer `repo`, `model`, and `condition` attributes must still be
+refused without proven declarations, even when the future command is invoked
+with plausible names. The skeleton does not authorize `repo.tableName`,
+`conditions[*].modelType`, or `previous_condition.nextCondition` edits; those
+remain blocked/manual until a complete owner/declaration/reference plan exists.
 
 The preferred owner is a future dedicated command:
 
