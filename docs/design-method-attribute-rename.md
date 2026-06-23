@@ -7,9 +7,10 @@ object-attribute casing support. Phase 3A implements read-only simple receiver
 method resolution, Phase 3B covers guarded apply for simple proven method calls,
 Phase 3C adds focused statementComposer-style smoke coverage for the
 method-call bucket, Phase 3D adds read-only helper-parameter receiver
-inference, and Phase 4A adds read-only discovery for simple project-owned
-object-attribute references. Apply behavior and object-attribute rename remain
-future work.
+inference, Phase 4A adds read-only discovery for simple project-owned
+object-attribute references, and Phase 4B documents the future guarded
+object-attribute apply boundary. Apply behavior and object-attribute rename
+remain future work.
 
 The goal is to make future casing migrations possible only when the tool can
 prove the owner of an attribute access. The tool must not make arbitrary textual
@@ -209,6 +210,109 @@ declaration remain dynamic, unresolved, blocked, or future work. Phase 4A is
 read-only discovery only; it does not add `rename-attribute`, does not broaden
 `customfmt rename`, and does not enable apply behavior for object attributes.
 
+
+### Phase 4B guarded apply boundary design
+
+Phase 4B is a design-and-test-plan boundary only. It does not implement
+object-attribute apply behavior, does not add `rename-attribute`, does not add
+`--attribute`, does not broaden local `customfmt rename`, and does not remove
+the statementComposer golden xfail. The purpose is to define the contract that
+a later implementation must satisfy before any object-attribute write is
+allowed.
+
+#### CLI ownership
+
+The preferred future command shape is a dedicated project-wide command:
+
+```bash
+customfmt rename-attribute <root> --class Repo --name tableName --to TableName
+```
+
+An acceptable explicit alternative is a project-wide symbol mode that makes the
+attribute boundary visible at the CLI:
+
+```bash
+customfmt rename-symbol <root> --attribute --class Repo --name tableName --to TableName
+```
+
+The local command is explicitly rejected for this bucket:
+
+```bash
+customfmt rename <root> --name tableName --to TableName
+```
+
+`customfmt rename` owns local lexical bindings only. Object attributes are
+project/API references whose ownership may span files, imports, receivers,
+frameworks, and serialization boundaries. Any implementation must therefore use
+a project-wide planner that consumes read-only discovery and emits guarded token
+edits; it must not route object-attribute apply through the local rename
+planner.
+
+#### Required complete plan
+
+A future object-attribute apply is allowed only when the planner builds one
+complete plan containing all of these token edits:
+
+1. The attribute declaration token on the proven owner class.
+2. Every safe read resolved to that declaration.
+3. Every safe write resolved to that declaration.
+4. Every affected file rendered and parsed successfully before any write.
+5. No unresolved, dynamic, skipped, external, partial, or ambiguous reference in
+   the discovered project reference set.
+
+The declaration and all safe references must be validated as one unit. A diff
+mode may render the same token plan read-only, but apply mode must reject any
+plan that cannot prove completeness.
+
+#### Apply blockers
+
+Apply mode must fail with exit code 2 and write nothing when any of these facts
+are present in the target project or plan:
+
+* Unknown receiver type.
+* External owner class or library API.
+* Inherited attribute without an explicit, tested attribute-resolution design.
+* Dataclass, Pydantic, SQLModel, ORM, or model-like owner.
+* `getattr`, `setattr`, or `hasattr` involving the owner, receiver, or spelling.
+* `__dict__` access or mutation involving the owner or receiver.
+* String references in configs, SQL, JSON, templates, migrations, or other
+  non-token locations.
+* Partial plans, including skipped, unresolved, dynamic, or external
+  references.
+* Multiple candidate owners.
+* Missing declaration on the specified owner class.
+* New-name collision on the owner class.
+* References to both the old and new spelling unless a later design explicitly
+  defines and tests mixed-spelling handling.
+
+#### Rollback and write safety
+
+Apply mode must stage all file edits in memory first. The implementation must
+render every edited file, parse every edited file, validate UTF-8 LF output, and
+only then write files. If any validation fails, no file may be written. If a
+write failure occurs after validation, the implementation must either roll back
+all written files to their original bytes or otherwise leave originals
+unchanged through an atomic-write strategy. Partial writes are not acceptable.
+
+#### Phase 4B test plan
+
+A future implementation must add focused tests for the guarded apply boundary
+before enabling object-attribute writes:
+
+| Case | Expected result |
+| --- | --- |
+| Safe same-file declaration/read/write diff | complete diff from one token plan |
+| Safe same-file declaration/read/write apply | declaration, read, and write are updated after all-files validation |
+| Imported class attribute diff/apply | resolved project import produces complete diff and guarded apply |
+| Unknown receiver | apply blocked with exit 2 and no writes |
+| Inherited attribute | apply blocked with exit 2 and no writes |
+| Future-mode owner, including dataclass/Pydantic/SQLModel/ORM/model-like classes | apply blocked with exit 2 and no writes |
+| Dynamic `getattr`, `setattr`, or `hasattr` | apply blocked with exit 2 and no writes |
+| `__dict__` access or mutation | apply blocked with exit 2 and no writes |
+| Declaration collision on owner class | apply blocked with exit 2 and no writes |
+| Partial unresolved plan | apply blocked with exit 2 and no writes |
+| statementComposer repo/model/condition fields | remain future/manual and the strict golden xfail remains |
+
 ### Supported future object-attribute target pattern
 
 A future object-attribute rename may be considered only when all of these facts
@@ -273,10 +377,10 @@ proves them safe:
 
 ### Proposed CLI ownership
 
-Object-attribute rename support likely belongs in a future dedicated command:
+Object-attribute rename support preferably belongs in a future dedicated command:
 
 ```bash
-customfmt rename-attribute <root> --class BaseRepo --name tableName --to TableName
+customfmt rename-attribute <root> --class Repo --name tableName --to TableName
 ```
 
 An alternative is an explicit project-wide mode on the existing symbol command:
