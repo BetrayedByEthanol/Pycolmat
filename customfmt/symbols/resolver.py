@@ -574,7 +574,10 @@ class _Resolver(ast.NodeVisitor):
    # -----------------------------------------------------------------------
 
    def visit_ClassDef(self, node: ast.ClassDef) -> None:
-      bases_extra = {"bases": [ast.unparse(b) for b in node.bases]}
+      bases_extra = {
+         "bases":      [ast.unparse(b) for b in node.bases],
+         "decorators": [ast.unparse(d) for d in node.decorator_list],
+      }
       self._AddDef(
          node.name, DefKind.ClassDef, node.lineno, node.col_offset, bases_extra
       )

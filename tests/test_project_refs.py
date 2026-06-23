@@ -1311,6 +1311,53 @@ class TestObjectAttributeRefs:
       assert data["dynamic_references"]
       assert data["dynamic_references"][0]["confidence"] == "dynamic"
 
+   def TestDataclassObjectAttributeRemainsDynamicFutureMode(self, tmp_path):
+      f = Write(
+         tmp_path / "main.py",
+         Src(
+            """
+            from dataclasses import dataclass
+
+            @dataclass
+            class Repo:
+               tableName: str
+
+            def Run():
+               repo = Repo()
+               return repo.tableName
+            """
+         ),
+      )
+
+      result, _ = FindRefsByName([str(f)], "tableName")
+      data = result.ToDict()
+
+      assert data["dynamic_references"]
+      assert data["dynamic_references"][0]["confidence"] == "dynamic"
+
+   def TestPydanticObjectAttributeRemainsDynamicFutureMode(self, tmp_path):
+      f = Write(
+         tmp_path / "main.py",
+         Src(
+            """
+            from pydantic import BaseModel
+
+            class Repo(BaseModel):
+               tableName: str
+
+            def Run():
+               repo = Repo()
+               return repo.tableName
+            """
+         ),
+      )
+
+      result, _ = FindRefsByName([str(f)], "tableName")
+      data = result.ToDict()
+
+      assert data["dynamic_references"]
+      assert data["dynamic_references"][0]["confidence"] == "dynamic"
+
    def TestInheritedObjectAttributeRemainsDynamic(self, tmp_path):
       f = Write(
          tmp_path / "main.py",
