@@ -322,6 +322,8 @@ class ProjectGraph:
          r for r in dynamic_refs
          if self._ObjectAttributeBlockReason(r) == "external_owner"
       ]
+      if not attr_defs and not attr_refs and not dynamic_refs and not unresolved_refs:
+         return
       owners = {
          (
             str(Path(r.ResolvedTo.FilePath).resolve()),
@@ -347,6 +349,9 @@ class ProjectGraph:
       complete = bool(attr_defs) and bool(attr_refs) and not block_reasons
       output.ObjectAttributePlan = {
          "kind":                 "object_attribute_read_only",
+         "status":               (
+            "read-only complete" if complete else "read-only blocked"
+         ),
          "name":                 name,
          "declaration_found":    bool(attr_defs),
          "complete":             complete,

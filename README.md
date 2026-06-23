@@ -271,8 +271,9 @@ file paths, the normalized scan roots, discovery errors, and
 `ambiguous_modules` for names that have more than one in-scan candidate.
 
 Output is always JSON with `definitions`, `references`,
-`unresolved_references`, `dynamic_references`, `errors`, and `summary`. Every
-reported definition or reference includes a `confidence` value:
+`unresolved_references`, `dynamic_references`, `object_attribute_plan`,
+`errors`, and `summary`. Every reported definition or reference includes a
+`confidence` value:
 
 | Confidence        | Meaning                                             |
 |-------------------|-----------------------------------------------------|
@@ -280,6 +281,37 @@ reported definition or reference includes a `confidence` value:
 | `import_resolved` | resolved through a supported import between files   |
 | `unresolved`      | no safe local or import target was found            |
 | `dynamic`         | skipped because the reference is dynamic/attribute-based |
+
+#### `object_attribute_plan` diagnostics
+
+`object_attribute_plan` is a read-only diagnostics object for object attribute
+queries such as `repo.TableName`. It is not an apply plan, does not enable a
+rename, and does not suggest any write command. `customfmt refs` includes the
+top-level `object_attribute_plan` key for every refs query. For non-attribute
+symbol queries, such as `customfmt refs src/ --name Build`, its value is an
+empty object (`{}`). For attribute-like queries it contains this stable schema:
+
+| Key                   | Meaning                                                        |
+|-----------------------|----------------------------------------------------------------|
+| `kind`                | Always `object_attribute_read_only` for populated plans         |
+| `status`              | Human-readable `read-only complete` or `read-only blocked`      |
+| `name`                | Queried attribute name                                          |
+| `declaration_found`   | Whether a direct class-body declaration was found               |
+| `complete`            | Whether all known refs were resolved without blockers           |
+| `apply_allowed`       | Always `false`; object-attribute apply is not implemented       |
+| `resolved_read_refs`  | Resolved read references to the attribute                       |
+| `resolved_write_refs` | Resolved write references to the attribute                      |
+| `dynamic_refs`        | Dynamic attribute references that block completeness            |
+| `unresolved_refs`     | Unresolved attribute references that block completeness         |
+| `external_refs`       | Dynamic refs whose owner appears outside the scanned project    |
+| `blocked`             | Whether completeness is blocked                                 |
+| `blocked_reasons`     | Machine-readable reasons such as `unknown_receiver`             |
+| `future_mode_owner`   | Whether the plan is blocked for a future owner mode/datamodel   |
+
+Future-mode owners, dynamic references, unknown receivers, inherited
+attributes, unresolved references, and external owners remain blocked. A
+complete object-attribute plan is still read-only and keeps
+`apply_allowed: false`.
 
 ---
 

@@ -1188,6 +1188,24 @@ class TestProjectRefs:
       assert "no Python files found" in err
 
 class TestObjectAttributeRefs:
+   def AssertObjectAttributePlanSchema(self, plan):
+      assert set(plan) == {
+         "kind",
+         "status",
+         "name",
+         "declaration_found",
+         "complete",
+         "apply_allowed",
+         "resolved_read_refs",
+         "resolved_write_refs",
+         "dynamic_refs",
+         "unresolved_refs",
+         "external_refs",
+         "blocked",
+         "blocked_reasons",
+         "future_mode_owner",
+      }
+
    def TestSameFileClassAttributeCompletenessPlanIsComplete(self, tmp_path):
       f = Write(
          tmp_path / "main.py",
@@ -1207,6 +1225,10 @@ class TestObjectAttributeRefs:
       result, _ = FindRefsByName([str(f)], "tableName")
       plan = result.ToDict()["object_attribute_plan"]
 
+      self.AssertObjectAttributePlanSchema(plan)
+      assert plan["kind"] == "object_attribute_read_only"
+      assert plan["name"] == "tableName"
+      assert plan["status"] == "read-only complete"
       assert plan["complete"] is True
       assert plan["declaration_found"] is True
       assert len(plan["resolved_read_refs"]) == 1
@@ -1217,6 +1239,53 @@ class TestObjectAttributeRefs:
       assert plan["blocked"] is False
       assert plan["future_mode_owner"] is False
       assert plan["apply_allowed"] is False
+
+   def TestNonAttributeSymbolLookupLeavesObjectAttributePlanEmpty(self, tmp_path):
+      f = Write(tmp_path / "main.py", "def Build():\n   return 1\n")
+
+      rc = Main(["refs", str(f), "--name", "Build", "--pretty"])
+      assert rc == 0
+
+      result, _ = FindRefsByName([str(f)], "Build")
+      data = result.ToDict()
+
+      assert "object_attribute_plan" in data
+      assert data["object_attribute_plan"] == {}
+
+   def TestCompleteObjectAttributePrettyOutputShowsReadOnlyStatus(self, tmp_path, capsys):
+      f = Write(
+         tmp_path / "main.py",
+         Src(
+            """
+            class Repo:
+               tableName = "x"
+
+            def Run():
+               repo = Repo()
+               return repo.tableName
+            """
+         ),
+      )
+
+      rc = Main(["refs", str(f), "--name", "tableName", "--pretty"])
+      out = capsys.readouterr().out
+
+      assert rc == 0
+      assert '"status": "read-only complete"' in out
+      assert '"apply_allowed": false' in out
+      assert "rename-attribute" not in out
+
+   def TestBlockedObjectAttributePrettyOutputShowsReasons(self, tmp_path, capsys):
+      f = Write(tmp_path / "main.py", "def Run(repo):\n   return repo.tableName\n")
+
+      rc = Main(["refs", str(f), "--name", "tableName", "--pretty"])
+      out = capsys.readouterr().out
+
+      assert rc == 0
+      assert '"status": "read-only blocked"' in out
+      assert '"apply_allowed": false' in out
+      assert '"missing_declaration"' in out
+      assert '"unknown_receiver"' in out
 
    def TestImportedClassAttributeCompletenessPlanIsComplete(self, tmp_path):
       pkg = Package(tmp_path)
