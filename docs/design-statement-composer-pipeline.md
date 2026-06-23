@@ -14,6 +14,8 @@ change. It intentionally proposes no formatter or resolver behavior changes.
 Phase 3 method-call support and Phase 4 object-attribute rename design are
 described separately in
 [`docs/design-method-attribute-rename.md`](design-method-attribute-rename.md).
+Phase 4B is design-only: it defines the future guarded object-attribute apply
+boundary and test plan, but it does not implement object-attribute writes.
 
 ## Safety principles
 
@@ -181,9 +183,10 @@ changed by the method-call pipeline. They must not be smuggled into
 
 Phase 4A implements read-only discovery for simple project-owned class-attribute
 references when the receiver type and direct class-body declaration are proven.
-It does not implement apply behavior, does not add `rename-attribute`, does not
-broaden local `customfmt rename`, and does not remove the strict
-statementComposer golden xfail.
+Phase 4B defines the future guarded apply contract and test plan. It does not
+implement apply behavior, does not add `rename-attribute`, does not add
+`rename-symbol --attribute`, does not broaden local `customfmt rename`, and
+does not remove the strict statementComposer golden xfail.
 
 A future object-attribute planner may consider repository metadata migrations
 such as `repo.tableName` -> `repo.TableName`, `repo.pk` -> `repo.Pk`,
@@ -205,10 +208,43 @@ be used to infer ownership. Dataclass, Pydantic, ORM, model, or condition fields
 remain blocked unless a future explicit mode defines how schema, serialization,
 and framework behavior are handled.
 
-The likely owner is a future `customfmt rename-attribute` command or an explicit
-project-wide `customfmt rename-symbol --attribute` mode. It must not be local
-`customfmt rename`, because object attributes are project/API references rather
-than local bindings.
+The preferred owner is a future dedicated command:
+
+```bash
+customfmt rename-attribute <root> --class Repo --name tableName --to TableName
+```
+
+An acceptable explicit alternative is a project-wide symbol mode:
+
+```bash
+customfmt rename-symbol <root> --attribute --class Repo --name tableName --to TableName
+```
+
+It must not be local `customfmt rename`, because object attributes are
+project/API references rather than local bindings. The future planner must own
+the declaration token, every safe read, and every safe write in one complete
+plan. Apply must be blocked by unknown receivers, external owners, inherited
+attributes, dataclass/Pydantic/SQLModel/ORM/model-like owners, dynamic
+`getattr`/`setattr`/`hasattr`, `__dict__`, string references, partial or
+unresolved plans, multiple candidate owners, missing declarations, owner-class
+new-name collisions, and mixed old/new spelling references unless a later design
+explicitly supports them.
+
+
+#### Phase 4B apply safety and tests
+
+A future object-attribute apply must stage all edits in memory, render and parse
+all edited files, validate complete UTF-8 LF output, and write files only after
+the full plan succeeds. On validation failure it must write nothing. On write
+failure it must roll back written files or use an atomic strategy that leaves
+original bytes unchanged. Partial writes are forbidden.
+
+The required future test plan includes safe same-file declaration/read/write
+diff and apply, imported class attribute diff and apply, blockers for unknown
+receivers, inherited attributes, future-mode framework/model-like owners,
+dynamic `getattr`/`setattr`/`hasattr`, `__dict__`, owner declaration
+collisions, and partial unresolved plans. StatementComposer `repo`, model, and
+condition fields remain future/manual and the golden xfail remains strict.
 
 For the statementComposer fixture specifically, `repo.tableName`, `repo.pk`,
 `repo.references`, and `repo.model` require proven `BaseRepo` or subclass
