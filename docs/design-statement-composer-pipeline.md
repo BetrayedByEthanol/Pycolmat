@@ -11,7 +11,8 @@ local rename pass until the golden output passes.
 This document analyzes the full delta and assigns ownership for each kind of
 change. It intentionally proposes no formatter or resolver behavior changes.
 
-Phase 3 method-call and object-attribute casing is designed separately in
+Phase 3 method-call support and Phase 4 object-attribute rename design are
+described separately in
 [`docs/design-method-attribute-rename.md`](design-method-attribute-rename.md).
 
 ## Safety principles
@@ -40,10 +41,13 @@ manual API decisions, not by one broad local pass:
 2. Run `customfmt rename-symbol` for project symbols that have definitions and
    safely resolved imports/references, such as `composeStatement` to
    `ComposeStatement`, private helper functions, and `findRepo` to `FindRepo`.
-   This Phase 1 bucket is implemented; method, attribute, and API casing buckets
-   remain future/manual work.
-3. Use future method/attribute rename support only for proven API owners where
-   receiver types and declarations can be resolved conservatively.
+   This Phase 1 bucket is implemented; method support is covered only for
+   proven project-owned receiver types, and object/model attribute or API casing
+   buckets remain future/manual work.
+3. Use method rename support only for proven project-owned receiver types, and
+   use future object-attribute rename support only when the project-owned class
+   declaration, attribute declaration, receiver type, and all reads/writes are
+   proven conservatively.
 4. Use manual/API migration for model fields, third-party or framework-reflected
    properties, and typo/API corrections that cannot be proven from the local
    file alone.
@@ -78,15 +82,15 @@ manual API decisions, not by one broad local pass:
 | `statement_builder.closeBracket` -> `CloseBracket` | statement-builder grouping API | method call rename | `customfmt rename-symbol` only when the receiver is proven to be a project-owned `StatementBuilder`; does not cover `closeBreacket` |
 | `statement_builder.select` -> `Select` | select-list API | method call rename | `customfmt rename-symbol` only when the receiver is proven to be a project-owned `StatementBuilder` |
 | `statement_builder.include` -> `Include` and `includeOptional` -> `IncludeOptional` | join API calls | method call rename | `customfmt rename-symbol` only when the receiver is proven to be a project-owned `StatementBuilder` |
-| `repo.tableName`, `rep.tableName`, `inc.tableName`, `target_repo.tableName` -> `TableName` | repository attributes used for SQL aliases and references | object attribute rename | future method/attribute rename support if repository declarations are proven; otherwise manual/API migration |
-| `repo.pk`, `inc.pk` -> `Pk` | repository primary-key metadata | object attribute rename | future method/attribute rename support if declarations are proven; otherwise manual/API migration |
-| `repo.references`, `inc.references` -> `References` | repository relationship metadata | object attribute rename | future method/attribute rename support if declarations are proven; otherwise manual/API migration |
-| `repo.model`, `inc.model` -> `Model` | repository model metadata | object attribute rename | future method/attribute rename support if declarations are proven; otherwise manual/API migration |
-| `conditions[*].modelType` -> `ModelType` | conditional statement model reference | model field/property rename | manual/API migration unless a future attribute planner can prove the `ConditionalStatement` field declaration and all safe references |
-| `conditions[*].fieldName` -> `FieldName` | conditional statement field reference | model field/property rename | manual/API migration unless proven by future attribute support |
-| `conditions[*].operation` -> `Operation` | conditional statement operation reference | model field/property rename | manual/API migration unless proven by future attribute support |
-| `conditions[*].condition` -> `Condition` | conditional statement value reference | model field/property rename | manual/API migration unless proven by future attribute support |
-| `previous_condition.nextCondition` -> `NextCondition` | chain condition link property | model field/property rename | manual/API migration unless proven by future attribute support |
+| `repo.tableName`, `rep.tableName`, `inc.tableName`, `target_repo.tableName` -> `TableName` | repository attributes used for SQL aliases and references | object attribute rename | future `rename-attribute` or `rename-symbol --attribute` only if `BaseRepo`/subclass ownership and declarations are proven; otherwise manual/API migration |
+| `repo.pk`, `inc.pk` -> `Pk` | repository primary-key metadata | object attribute rename | future `rename-attribute` or `rename-symbol --attribute` only if `BaseRepo`/subclass ownership and declarations are proven; otherwise manual/API migration |
+| `repo.references`, `inc.references` -> `References` | repository relationship metadata | object attribute rename | future `rename-attribute` or `rename-symbol --attribute` only if `BaseRepo`/subclass ownership and declarations are proven; otherwise manual/API migration |
+| `repo.model`, `inc.model` -> `Model` | repository model metadata | object attribute rename | future `rename-attribute` or `rename-symbol --attribute` only if `BaseRepo`/subclass ownership and declarations are proven; otherwise manual/API migration |
+| `conditions[*].modelType` -> `ModelType` | conditional statement model reference | model field/property rename | manual/API migration unless a future attribute planner proves declarations, ownership, all safe references, and serialization implications |
+| `conditions[*].fieldName` -> `FieldName` | conditional statement field reference | model field/property rename | manual/API migration unless declarations, ownership, all safe references, and serialization implications are proven |
+| `conditions[*].operation` -> `Operation` | conditional statement operation reference | model field/property rename | manual/API migration unless declarations, ownership, all safe references, and serialization implications are proven |
+| `conditions[*].condition` -> `Condition` | conditional statement value reference | model field/property rename | manual/API migration unless declarations, ownership, all safe references, and serialization implications are proven |
+| `previous_condition.nextCondition` -> `NextCondition` | chain condition link property | model field/property rename | manual/API migration unless declarations, ownership, all safe references, and serialization implications are proven |
 | `statementBuilder.closeBreacket()` -> `statement_builder.CloseBracket()` | misspelled API call in input | typo/API correction | manual/API migration only; should not be inferred by rename tools |
 
 ## Bucket ownership details
@@ -172,6 +176,45 @@ Object/model attributes remain outside this bucket. `repo.tableName`, `repo.pk`,
 `conditions[*].condition`, and `previous_condition.nextCondition` must not be
 changed by the method-call pipeline. They must not be smuggled into
 `customfmt rename` by matching attribute text.
+
+### Phase 4 object-attribute rename design
+
+Phase 4 is design-only. It does not implement behavior, does not modify resolver
+behavior, and does not remove the strict statementComposer golden xfail.
+
+A future object-attribute planner may consider repository metadata migrations
+such as `repo.tableName` -> `repo.TableName`, `repo.pk` -> `repo.Pk`,
+`repo.references` -> `repo.References`, and `repo.model` -> `repo.Model` only
+when all of these facts are proven:
+
+* The receiver belongs to a project-owned class declaration, such as `BaseRepo`
+  or an explicitly proven subclass.
+* The old and new spellings map to a proven attribute declaration on that owner.
+* Every read and write for the attribute is resolved into one complete token
+  plan.
+* No dynamic `getattr`, `setattr`, `hasattr`, `__dict__`, framework magic,
+  generated/reflected field behavior, serialized/API field ambiguity, external
+  owner, or unsupported inherited attribute participates in the plan.
+
+Unknown receiver expressions remain blocked. The spelling `repo.tableName` is
+not sufficient evidence that `repo` is a repository, and text matching must not
+be used to infer ownership. Dataclass, Pydantic, ORM, model, or condition fields
+remain blocked unless a future explicit mode defines how schema, serialization,
+and framework behavior are handled.
+
+The likely owner is a future `customfmt rename-attribute` command or an explicit
+project-wide `customfmt rename-symbol --attribute` mode. It must not be local
+`customfmt rename`, because object attributes are project/API references rather
+than local bindings.
+
+For the statementComposer fixture specifically, `repo.tableName`, `repo.pk`,
+`repo.references`, and `repo.model` require proven `BaseRepo` or subclass
+ownership before any automated casing migration. `conditions[*].modelType`,
+`conditions[*].fieldName`, `conditions[*].operation`,
+`conditions[*].condition`, and `previous_condition.nextCondition` are
+model/property migrations and remain manual unless declarations are proven. The
+`closeBreacket` typo/API correction remains manual and outside attribute rename
+support.
 
 ### Manual/API migration only
 

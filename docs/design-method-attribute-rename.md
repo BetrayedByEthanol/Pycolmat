@@ -2,12 +2,13 @@
 
 ## Status and scope
 
-This document designs a Phase 3 rename bucket for conservative method-call and
+This document designs conservative rename buckets for method-call and
 object-attribute casing support. Phase 3A implements read-only simple receiver
 method resolution, Phase 3B covers guarded apply for simple proven method calls,
 Phase 3C adds focused statementComposer-style smoke coverage for the
 method-call bucket, and Phase 3D adds read-only helper-parameter receiver
-inference. Object-attribute rename remains future work.
+inference. Phase 4 is a design-only bucket for future conservative
+object-attribute rename support. Object-attribute rename remains future work.
 
 The goal is to make future casing migrations possible only when the tool can
 prove the owner of an attribute access. The tool must not make arbitrary textual
@@ -166,21 +167,24 @@ complete token plan, render a diff, and apply only after validation.
 variables and the already-designed conservative private-helper parameter casing
 bucket.
 
-## Track B: Object-attribute rename support
+## Track B: Phase 4 object-attribute rename support
 
 ### Supported future object-attribute target pattern
 
 A future object-attribute rename may be considered only when all of these facts
 are proven:
 
-1. A project-owned class, dataclass, Pydantic model, or model declaration owns the
-   attribute declaration.
-2. The declaration and all safe attribute reads and writes are resolved to that
-   same owner.
-3. The tool can build a complete project-wide plan covering every affected token.
-4. Dynamic attribute mechanisms are absent or explicitly classified as blocking.
-5. Serialized/public API implications are reviewed before apply mode is allowed.
-6. The planner can validate the whole affected file set before writing any file.
+1. A project-owned class declaration is proven as the owner of the receiver.
+2. The attribute declaration is proven on that project-owned class.
+3. Every read and write for the attribute is resolved to that same declaration.
+4. No dynamic `getattr`, `setattr`, or `hasattr` use can affect the attribute.
+5. No `__dict__` access or mutation can affect the attribute.
+6. No generated, reflected, serialized, or public API field ambiguity exists.
+7. No external class owns or participates in the planned attribute references.
+8. No inherited attribute is included unless explicit method-resolution-order and
+   attribute-resolution support is designed and tested.
+9. The planner can build one complete project-wide token plan and validate the
+   whole affected file set before writing any file.
 
 Example future-safe shape:
 
@@ -192,9 +196,18 @@ repo: BaseRepo = BaseRepo()
 print(repo.tableName)
 ```
 
-This still requires proof that `repo` is a `BaseRepo` or known subclass, that the
-attribute belongs to that owner, and that all safe reads and writes are included
-in one guarded plan.
+This still requires proof that `repo` is a `BaseRepo` or explicitly supported
+subclass, that `TableName` is the declaration being migrated, and that every
+read and write of the old spelling is included in one guarded plan. A receiver
+name such as `repo` is never proof by itself.
+
+The motivating repository metadata migrations are examples of this future
+bucket only after ownership is proven:
+
+* `repo.tableName` -> `repo.TableName`
+* `repo.pk` -> `repo.Pk`
+* `repo.references` -> `repo.References`
+* `repo.model` -> `repo.Model`
 
 ### Blocked patterns
 
@@ -202,79 +215,73 @@ The following patterns must remain blocked unless a later design explicitly
 proves them safe:
 
 * Arbitrary `repo.tableName` where `repo` type is unknown.
-* Generated or reflected fields.
-* Serialized API fields.
+* Dataclass, Pydantic, ORM, or other model fields unless serialization and
+  schema implications are explicit.
 * Dynamic `setattr`, `getattr`, or `hasattr` usage.
 * `__dict__` access or mutation.
-* Framework magic.
-* External object attributes.
-* Descriptor behavior that changes lookup ownership.
-* Attribute names used in strings, configs, SQL, JSON, templates, or migrations.
-* Partial plans where some reads or writes are unresolved.
+* String references in configs, SQL, JSON, templates, migrations, comments, or
+  other non-token locations.
+* Framework magic, descriptors, generated fields, reflected fields, plugin
+  hooks, monkey-patching, or dynamically attached attributes.
+* External object attributes or library APIs.
+* Inherited attributes unless MRO and attribute shadowing are explicitly
+  supported.
+* Model or condition fields from the statementComposer fixture unless their
+  declarations are proven.
+* Partial plans where some reads or writes are unresolved, dynamic, skipped, or
+  external.
 
-### Likely owner
+### Proposed CLI ownership
 
-Object-attribute rename support likely belongs in a future `rename-attribute`
-command or an explicitly extended `rename-symbol` mode, not in local
-`customfmt rename`. The local rename planner cannot prove project-wide object
-ownership and must not rewrite `obj.attr` text by pattern.
+Object-attribute rename support likely belongs in a future dedicated command:
 
-## StatementComposer implications
+```bash
+customfmt rename-attribute <root> --class BaseRepo --name tableName --to TableName
+```
 
-The `statementComposer` golden fixture includes several changes that look like
-simple casing fixes but are not safe local renames:
+An alternative is an explicit project-wide mode on the existing symbol command:
 
-* `statement_builder.where` to `statement_builder.Where` is safe only when the
-  guarded method apply proves `statement_builder` is a `StatementBuilder` and
-  that `where` is the owned method declaration being migrated.
-* `repo.tableName` to `repo.TableName` is not safe until the tool proves `repo`
-  is a `BaseRepo` or known subclass and owns that attribute.
-* `conditions[*].modelType` to `ModelType` is a model/property migration and may
-  be manual unless declarations are provable.
-* `closeBreacket` to `CloseBracket` is an API typo migration and should remain
-  manual. It is not a safe rename inference because it changes both spelling and
-  casing.
+```bash
+customfmt rename-symbol <root> --attribute --class BaseRepo --name tableName --to TableName
+```
 
-Phase 3C covers only an artificial, proven project-owned `StatementBuilder`
-method-call smoke slice with a local stub. Repository attributes, condition/model
-attributes, and typo/API migrations remain future/manual work. For this reason,
-the full statementComposer method/attribute bucket should remain
-`xfail(strict=True)` until object-attribute rename and the remaining manual/API
-migration tracks have targeted tests and safety guards.
+It must not belong to local `customfmt rename`. Object attributes are
+project/API references, not local bindings, and require project-wide ownership
+proof, complete reference discovery, guarded token rendering, diff support, and
+all-files validation before apply.
 
-Typed helper-parameter receiver inference for the real statementComposer fixture
-is not part of Phase 3C. Proving that a helper parameter such as
-`statementBuilder` is always a project-owned `StatementBuilder` through the
-fixture call graph should be designed and tested as a separate Phase 3D task.
+### Phase 4 test matrix
 
-## Proposed future test matrix
+A future implementation should add targeted tests before any statementComposer
+golden xfail is removed:
 
-When a future implementation is started, add targeted coverage before removing
-any statementComposer xfail:
+| Case | Expected result |
+| --- | --- |
+| Safe same-file class attribute declaration, read, and write | complete plan / diff / apply succeeds |
+| Safe imported class attribute declaration with resolved project import | complete plan / diff / apply succeeds |
+| Assignment, read, and write coverage for one proven owner | every token included in one plan |
+| Unknown receiver such as arbitrary `repo.tableName` | blocked |
+| Dynamic `getattr`, `setattr`, or `hasattr` involving the name or receiver | blocked |
+| `__dict__` access involving the receiver or owner | blocked |
+| Inherited attribute without explicit MRO support | blocked |
+| Dataclass, Pydantic, ORM, generated, reflected, or serialized fields | blocked unless an explicit future mode defines schema/API handling |
+| External class attributes | blocked |
+| StatementComposer repository/model/condition fields | remain future/manual unless declarations are proven |
 
-| Area | Scenario | Expected result |
-| --- | --- | --- |
-| Method call | Safe same-file class method rename | Covered by guarded method apply when declaration and proven calls are planned together |
-| Method call | Safe imported class method rename | Covered by guarded method apply when import graph proves class owner and calls |
-| Method call | Dynamic receiver | Blocked |
-| Method call | Inherited method | Blocked or explicitly unresolved until MRO handling is designed |
-| Method call | `getattr(obj, "method")` | Blocked |
-| Object attribute | Safe class attribute rename | Declaration and proven reads/writes planned together |
-| Object attribute | Dataclass/Pydantic field rename | Allowed only if complete and serialization implications are safe |
-| Object attribute | Dynamic `setattr`/`getattr`/`hasattr` | Blocked |
-| StatementComposer | Simple proven method calls | Covered by guarded method apply smoke coverage and the Phase 3C statementComposer-style smoke test |
-| StatementComposer | Object-attribute bucket | Remains future work; full golden remains xfail |
+### StatementComposer Phase 4 notes
 
-## Implementation boundaries for a future PR
+The statementComposer fixture remains a planning fixture, not authorization for
+attribute text replacement. Repository metadata such as `repo.tableName`,
+`repo.pk`, `repo.references`, and `repo.model` requires proven `BaseRepo` or
+subclass ownership before a future attribute planner may consider edits. The
+planner must prove the repository declaration, the receiver type, and every
+read/write reference.
 
-A future PR should keep responsibilities separated:
+Condition and model fields such as `conditions[*].modelType`,
+`conditions[*].fieldName`, `conditions[*].operation`,
+`conditions[*].condition`, and `previous_condition.nextCondition` are
+model/property migrations. They remain manual unless declarations are proven and
+serialization or framework implications are explicitly handled.
 
-* `symbols/project_graph.py` remains read-only project reference discovery.
-* `symbols/resolver.py` remains read-only lexical resolution and must not write
-  files.
-* Any write path must use a guarded token renderer and validate every affected
-  file before writing.
-* Apply mode must fail by default when the plan has warnings, skipped items,
-  unresolved references, or dynamic references.
-* The future implementation must update README and command help if it adds new
-  commands, flags, exit behavior, or output schema.
+The `closeBreacket` typo/API correction remains manual. It is not an object
+attribute rename, and it must not be inferred from casing rules.
