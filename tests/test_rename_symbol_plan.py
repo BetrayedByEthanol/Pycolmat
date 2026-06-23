@@ -1277,6 +1277,269 @@ class TestRenameSymbolApply:
       assert "return builder.Where()" in text
       assert "where" not in text
 
+   def TestApplySameFileHelperParameterMethodCallWritesBoundary(self, tmp_path):
+      original = Src(
+         """
+         class Builder:
+            def where(self):
+               return self
+
+         def Run():
+            builder = Builder()
+            Helper(builder)
+
+         def Helper(builder):
+            return builder.where()
+         """
+      )
+      f = Write(tmp_path / "main.py", original)
+
+      diff_rc, diff_out, diff_err = TestRenameSymbolDiff().RunDiff(
+         f, "--name", "where", "--to", "Where"
+      )
+
+      assert diff_rc == 0
+      assert diff_err == ""
+      assert "-   def where(self):" in diff_out
+      assert "+   def Where(self):" in diff_out
+      assert "-   return builder.where()" in diff_out
+      assert "+   return builder.Where()" in diff_out
+      assert f.read_text(encoding="utf-8") == original
+
+      rc, out, err = self.RunApply(f, "--name", "where", "--to", "Where")
+
+      assert rc == 0
+      assert err == ""
+      assert f"renamed {f}" in out
+      text = f.read_text(encoding="utf-8")
+      assert "def Where(self):" in text
+      assert "return builder.Where()" in text
+      assert "where" not in text
+
+   def TestApplyImportedHelperParameterMethodCallWritesBoundary(self, tmp_path):
+      pkg = Package(tmp_path)
+      helper = Write(
+         pkg / "helpers.py",
+         Src(
+            """
+            def Helper(builder):
+               return builder.where()
+            """
+         ),
+      )
+      builder_file = Write(
+         pkg / "builder.py",
+         Src(
+            """
+            class Builder:
+               def where(self):
+                  return self
+            """
+         ),
+      )
+      Write(
+         pkg / "main.py",
+         Src(
+            """
+            from pkg.builder import Builder
+            from pkg.helpers import Helper
+
+            def Run():
+               builder = Builder()
+               Helper(builder)
+            """
+         ),
+      )
+
+      diff_rc, diff_out, diff_err = TestRenameSymbolDiff().RunDiff(
+         pkg, "--name", "where", "--to", "Where"
+      )
+
+      assert diff_rc == 0
+      assert diff_err == ""
+      assert f"--- a/{builder_file}" in diff_out
+      assert f"--- a/{helper}" in diff_out
+      assert "-   def where(self):" in diff_out
+      assert "+   def Where(self):" in diff_out
+      assert "-   return builder.where()" in diff_out
+      assert "+   return builder.Where()" in diff_out
+
+      rc, out, err = self.RunApply(pkg, "--name", "where", "--to", "Where")
+
+      assert rc == 0
+      assert err == ""
+      assert f"renamed {builder_file}" in out
+      assert f"renamed {helper}" in out
+      assert "def Where(self):" in builder_file.read_text(encoding="utf-8")
+      assert "return builder.Where()" in helper.read_text(encoding="utf-8")
+
+   def TestApplyConflictingHelperParameterCallsRefusesAndWritesNothing(self, tmp_path):
+      original = Src(
+         """
+         class Builder:
+            def where(self):
+               return self
+
+         class Other:
+            pass
+
+         def Run():
+            builder = Builder()
+            other = Other()
+            Helper(builder)
+            Helper(other)
+
+         def Helper(builder):
+            return builder.where()
+         """
+      )
+      f = Write(tmp_path / "main.py", original)
+
+      rc, out, err = self.RunApply(f, "--name", "where", "--to", "Where")
+
+      assert rc == 2
+      assert out == ""
+      assert "dynamic reference" in err
+      assert f.read_text(encoding="utf-8") == original
+
+   def TestApplyKeywordHelperParameterCallRefusesAndWritesNothing(self, tmp_path):
+      original = Src(
+         """
+         class Builder:
+            def where(self):
+               return self
+
+         def Run():
+            builder = Builder()
+            Helper(builder=builder)
+
+         def Helper(builder):
+            return builder.where()
+         """
+      )
+      f = Write(tmp_path / "main.py", original)
+
+      rc, out, err = self.RunApply(f, "--name", "where", "--to", "Where")
+
+      assert rc == 2
+      assert out == ""
+      assert "dynamic reference" in err
+      assert f.read_text(encoding="utf-8") == original
+
+   def TestApplyStarArgsHelperParameterCallRefusesAndWritesNothing(self, tmp_path):
+      original = Src(
+         """
+         class Builder:
+            def where(self):
+               return self
+
+         def Run(args):
+            Helper(*args)
+
+         def Helper(builder):
+            return builder.where()
+         """
+      )
+      f = Write(tmp_path / "main.py", original)
+
+      rc, out, err = self.RunApply(f, "--name", "where", "--to", "Where")
+
+      assert rc == 2
+      assert out == ""
+      assert "dynamic reference" in err
+      assert f.read_text(encoding="utf-8") == original
+
+   def TestApplyKwargsHelperParameterCallRefusesAndWritesNothing(self, tmp_path):
+      original = Src(
+         """
+         class Builder:
+            def where(self):
+               return self
+
+         def Run(kwargs):
+            Helper(**kwargs)
+
+         def Helper(builder):
+            return builder.where()
+         """
+      )
+      f = Write(tmp_path / "main.py", original)
+
+      rc, out, err = self.RunApply(f, "--name", "where", "--to", "Where")
+
+      assert rc == 2
+      assert out == ""
+      assert "dynamic reference" in err
+      assert f.read_text(encoding="utf-8") == original
+
+   def TestApplyDynamicHelperCalleeRefusesAndWritesNothing(self, tmp_path):
+      original = Src(
+         """
+         class Builder:
+            def where(self):
+               return self
+
+         def Run(fn):
+            builder = Builder()
+            fn(builder)
+
+         def Helper(builder):
+            return builder.where()
+         """
+      )
+      f = Write(tmp_path / "main.py", original)
+
+      rc, out, err = self.RunApply(f, "--name", "where", "--to", "Where")
+
+      assert rc == 2
+      assert out == ""
+      assert "dynamic reference" in err
+      assert f.read_text(encoding="utf-8") == original
+
+   def TestApplyStatementComposerStyleHelperParameterBoundary(self, tmp_path):
+      f = Write(
+         tmp_path / "main.py",
+         Src(
+            """
+            class StatementBuilder:
+               def where(self, condition):
+                  return self
+
+            def Compose(repo, conditions, previous_condition):
+               statement_builder = StatementBuilder()
+               __BuildConditions(statement_builder, repo, conditions, previous_condition)
+
+            def __BuildConditions(statement_builder, repo, conditions, previous_condition):
+               statement_builder.where(conditions[0].modelType)
+               repo.tableName
+               repo.pk
+               repo.references
+               repo.model
+               conditions[0].fieldName
+               conditions[0].operation
+               conditions[0].condition
+               previous_condition.nextCondition
+            """
+         ),
+      )
+
+      rc, out, err = self.RunApply(f, "--name", "where", "--to", "Where")
+
+      assert rc == 0
+      assert err == ""
+      assert f"renamed {f}" in out
+      text = f.read_text(encoding="utf-8")
+      assert "def Where(self, condition):" in text
+      assert "statement_builder.Where(conditions[0].modelType)" in text
+      assert "repo.tableName" in text
+      assert "repo.pk" in text
+      assert "repo.references" in text
+      assert "repo.model" in text
+      assert "conditions[0].fieldName" in text
+      assert "conditions[0].operation" in text
+      assert "conditions[0].condition" in text
+      assert "previous_condition.nextCondition" in text
+
    def TestApplyStatementComposerStyleProvenMethodCallsAndLeavesObjectAttributes(
       self, tmp_path
    ):
