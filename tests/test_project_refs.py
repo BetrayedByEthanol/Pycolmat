@@ -1335,6 +1335,32 @@ class TestObjectAttributeRefs:
       assert data["dynamic_references"]
       assert data["dynamic_references"][0]["confidence"] == "dynamic"
 
+   def TestQualifiedDataclassObjectAttributeRemainsDynamicFutureMode(
+      self, tmp_path
+   ):
+      f = Write(
+         tmp_path / "main.py",
+         Src(
+            """
+            import dataclasses
+
+            @dataclasses.dataclass
+            class Repo:
+               tableName: str
+
+            def Run():
+               repo = Repo()
+               return repo.tableName
+            """
+         ),
+      )
+
+      result, _ = FindRefsByName([str(f)], "tableName")
+      data = result.ToDict()
+
+      assert data["dynamic_references"]
+      assert data["dynamic_references"][0]["confidence"] == "dynamic"
+
    def TestPydanticObjectAttributeRemainsDynamicFutureMode(self, tmp_path):
       f = Write(
          tmp_path / "main.py",
@@ -1347,6 +1373,120 @@ class TestObjectAttributeRefs:
 
             def Run():
                repo = Repo()
+               return repo.tableName
+            """
+         ),
+      )
+
+      result, _ = FindRefsByName([str(f)], "tableName")
+      data = result.ToDict()
+
+      assert data["dynamic_references"]
+      assert data["dynamic_references"][0]["confidence"] == "dynamic"
+
+   def TestQualifiedPydanticObjectAttributeRemainsDynamicFutureMode(
+      self, tmp_path
+   ):
+      f = Write(
+         tmp_path / "main.py",
+         Src(
+            """
+            import pydantic
+
+            class Repo(pydantic.BaseModel):
+               tableName: str
+
+            def Run():
+               repo = Repo()
+               return repo.tableName
+            """
+         ),
+      )
+
+      result, _ = FindRefsByName([str(f)], "tableName")
+      data = result.ToDict()
+
+      assert data["dynamic_references"]
+      assert data["dynamic_references"][0]["confidence"] == "dynamic"
+
+   def TestSqlModelObjectAttributeRemainsDynamicFutureMode(self, tmp_path):
+      f = Write(
+         tmp_path / "main.py",
+         Src(
+            """
+            class Repo(SQLModel):
+               tableName: str
+
+            def Run():
+               repo = Repo()
+               return repo.tableName
+            """
+         ),
+      )
+
+      result, _ = FindRefsByName([str(f)], "tableName")
+      data = result.ToDict()
+
+      assert data["dynamic_references"]
+      assert data["dynamic_references"][0]["confidence"] == "dynamic"
+
+   def TestOrmBaseObjectAttributeRemainsDynamicFutureMode(self, tmp_path):
+      f = Write(
+         tmp_path / "main.py",
+         Src(
+            """
+            class Repo(OrmBase):
+               tableName = "x"
+
+            def Run():
+               repo = Repo()
+               return repo.tableName
+            """
+         ),
+      )
+
+      result, _ = FindRefsByName([str(f)], "tableName")
+      data = result.ToDict()
+
+      assert data["dynamic_references"]
+      assert data["dynamic_references"][0]["confidence"] == "dynamic"
+
+   def TestCalledDecoratorObjectAttributeRemainsDynamicFutureMode(
+      self, tmp_path
+   ):
+      f = Write(
+         tmp_path / "main.py",
+         Src(
+            """
+            @pydantic.dataclasses.dataclass()
+            class Repo:
+               tableName: str
+
+            def Run():
+               repo = Repo()
+               return repo.tableName
+            """
+         ),
+      )
+
+      result, _ = FindRefsByName([str(f)], "tableName")
+      data = result.ToDict()
+
+      assert data["dynamic_references"]
+      assert data["dynamic_references"][0]["confidence"] == "dynamic"
+
+   def TestModelNamedOwnerObjectAttributeRemainsDynamicConservatively(
+      self, tmp_path
+   ):
+      f = Write(
+         tmp_path / "main.py",
+         Src(
+            """
+            class ViewModel:
+               tableName = "x"
+
+            def Run():
+               repo = ViewModel()
                return repo.tableName
             """
          ),
