@@ -740,6 +740,8 @@ class ProjectGraph:
    def _DirectClassAttributeForClass(
       self, class_def: Definition, attr_name: str
    ) -> Definition | None:
+      if self._ClassAttributeOwnerIsFutureMode(class_def):
+         return None
       for defn in self._AllDefinitions():
          if defn.Kind != DefKind.ClassDecl or defn.Name != attr_name:
             continue
@@ -751,6 +753,27 @@ class ProjectGraph:
             continue
          return defn
       return None
+
+   def _ClassAttributeOwnerIsFutureMode(self, class_def: Definition) -> bool:
+      blocked_tokens = {
+         "dataclass",
+         "pydantic",
+         "basemodel",
+         "sqlmodel",
+         "model",
+         "orm",
+      }
+      raw_items = [
+         *class_def.Extra.get("bases", []),
+         *class_def.Extra.get("decorators", []),
+      ]
+      for item in raw_items:
+         if not isinstance(item, str):
+            continue
+         normalized = item.lower()
+         if any(token in normalized for token in blocked_tokens):
+            return True
+      return False
 
    def _DirectMethodForClass(
       self, class_def: Definition, method_name: str
