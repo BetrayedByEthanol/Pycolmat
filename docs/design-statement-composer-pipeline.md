@@ -183,10 +183,15 @@ changed by the method-call pipeline. They must not be smuggled into
 
 Phase 4A implements read-only discovery for simple project-owned class-attribute
 references when the receiver type and direct class-body declaration are proven.
-Phase 4B defines the future guarded apply contract and test plan. It does not
-implement apply behavior, does not add `rename-attribute`, does not add
-`rename-symbol --attribute`, does not broaden local `customfmt rename`, and
-does not remove the strict statementComposer golden xfail.
+Phase 4B defines the future guarded apply contract and test plan. Phase 4C adds
+read-only completeness diagnostics for object-attribute candidates before any
+write support exists. It reports whether the declaration, resolved reads,
+resolved writes, dynamic references, unresolved references, external references,
+and blocked/future-mode owner status would make a future plan complete. It
+always reports `apply_allowed: false` for now. These phases do not implement
+apply behavior, do not add `rename-attribute`, do not add
+`rename-symbol --attribute`, do not broaden local `customfmt rename`, and do not
+remove the strict statementComposer golden xfail.
 
 A future object-attribute planner may consider repository metadata migrations
 such as `repo.tableName` -> `repo.TableName`, `repo.pk` -> `repo.Pk`,
@@ -206,7 +211,11 @@ Unknown receiver expressions remain blocked. The spelling `repo.tableName` is
 not sufficient evidence that `repo` is a repository, and text matching must not
 be used to infer ownership. Dataclass, Pydantic, ORM, model, or condition fields
 remain blocked unless a future explicit mode defines how schema, serialization,
-and framework behavior are handled.
+and framework behavior are handled. The migration path therefore needs
+read-only completeness diagnostics before write support: the tool must first
+show that repository attributes have proven owner classes, direct declarations,
+and complete read/write coverage, while leaving StatementComposer repository
+attributes incomplete when those facts are absent.
 
 The preferred owner is a future dedicated command:
 

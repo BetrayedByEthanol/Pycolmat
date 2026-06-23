@@ -754,6 +754,7 @@ class TestProjectRefs:
          "definitions",
          "dynamic_references",
          "errors",
+         "object_attribute_plan",
          "query",
          "references",
          "summary",
@@ -1187,6 +1188,228 @@ class TestProjectRefs:
       assert "no Python files found" in err
 
 class TestObjectAttributeRefs:
+   def TestSameFileClassAttributeCompletenessPlanIsComplete(self, tmp_path):
+      f = Write(
+         tmp_path / "main.py",
+         Src(
+            """
+            class Repo:
+               tableName = "x"
+
+            def Run():
+               repo = Repo()
+               value = repo.tableName
+               repo.tableName = value
+            """
+         ),
+      )
+
+      result, _ = FindRefsByName([str(f)], "tableName")
+      plan = result.ToDict()["object_attribute_plan"]
+
+      assert plan["complete"] is True
+      assert plan["declaration_found"] is True
+      assert len(plan["resolved_read_refs"]) == 1
+      assert len(plan["resolved_write_refs"]) == 1
+      assert plan["dynamic_refs"] == []
+      assert plan["unresolved_refs"] == []
+      assert plan["external_refs"] == []
+      assert plan["blocked"] is False
+      assert plan["future_mode_owner"] is False
+      assert plan["apply_allowed"] is False
+
+   def TestImportedClassAttributeCompletenessPlanIsComplete(self, tmp_path):
+      pkg = Package(tmp_path)
+      Write(pkg / "repos.py", "class Repo:\n   tableName = \"x\"\n")
+      Write(
+         pkg / "main.py",
+         Src(
+            """
+            from pkg.repos import Repo
+
+            def Run():
+               repo = Repo()
+               return repo.tableName
+            """
+         ),
+      )
+
+      result, _ = FindRefsByName([str(pkg)], "tableName")
+      plan = result.ToDict()["object_attribute_plan"]
+
+      assert plan["complete"] is True
+      assert plan["declaration_found"] is True
+      assert len(plan["resolved_read_refs"]) == 1
+      assert plan["blocked"] is False
+      assert plan["apply_allowed"] is False
+
+   def TestUnknownReceiverCompletenessPlanIsDynamic(self, tmp_path):
+      f = Write(tmp_path / "main.py", "def Run(repo):\n   return repo.tableName\n")
+
+      result, _ = FindRefsByName([str(f)], "tableName")
+      plan = result.ToDict()["object_attribute_plan"]
+
+      assert plan["complete"] is False
+      assert plan["dynamic_refs"]
+      assert "missing_declaration" in plan["blocked_reasons"]
+      assert "unknown_receiver" in plan["blocked_reasons"]
+      assert plan["apply_allowed"] is False
+
+   def TestDynamicAttributeHelpersCompletenessPlanIsBlocked(self, tmp_path):
+      f = Write(
+         tmp_path / "main.py",
+         Src(
+            """
+            class Repo:
+               tableName = "x"
+
+            def Run():
+               repo = Repo()
+               getattr(repo, "tableName")
+               setattr(repo, "tableName", "y")
+               hasattr(repo, "tableName")
+            """
+         ),
+      )
+
+      result, _ = FindRefsByName([str(f)], "tableName")
+      plan = result.ToDict()["object_attribute_plan"]
+
+      assert plan["complete"] is False
+      assert len(plan["dynamic_refs"]) == 3
+      assert "dynamic_attribute_helper" in plan["blocked_reasons"]
+      assert plan["apply_allowed"] is False
+
+   def TestDictAttributeCompletenessPlanIsBlocked(self, tmp_path):
+      f = Write(
+         tmp_path / "main.py",
+         Src(
+            """
+            class Repo:
+               tableName = "x"
+
+            def Run():
+               repo = Repo()
+               return repo.__dict__["tableName"]
+            """
+         ),
+      )
+
+      result, _ = FindRefsByName([str(f)], "tableName")
+      plan = result.ToDict()["object_attribute_plan"]
+
+      assert plan["complete"] is False
+      assert "no_attribute_references" in plan["blocked_reasons"]
+      assert plan["apply_allowed"] is False
+
+   def TestFutureModeOwnerCompletenessPlanIsBlocked(self, tmp_path):
+      f = Write(
+         tmp_path / "main.py",
+         Src(
+            """
+            from dataclasses import dataclass
+
+            @dataclass
+            class Repo:
+               tableName: str
+
+            def Run():
+               repo = Repo()
+               return repo.tableName
+            """
+         ),
+      )
+
+      result, _ = FindRefsByName([str(f)], "tableName")
+      plan = result.ToDict()["object_attribute_plan"]
+
+      assert plan["complete"] is False
+      assert plan["future_mode_owner"] is True
+      assert "future_mode_owner" in plan["blocked_reasons"]
+      assert plan["apply_allowed"] is False
+
+   def TestInheritedAttributeCompletenessPlanIsBlocked(self, tmp_path):
+      f = Write(
+         tmp_path / "main.py",
+         Src(
+            """
+            class Base:
+               tableName = "x"
+
+            class Repo(Base):
+               pass
+
+            def Run():
+               repo = Repo()
+               return repo.tableName
+            """
+         ),
+      )
+
+      result, _ = FindRefsByName([str(f)], "tableName")
+      plan = result.ToDict()["object_attribute_plan"]
+
+      assert plan["complete"] is False
+      assert "inherited_attribute" in plan["blocked_reasons"]
+      assert plan["apply_allowed"] is False
+
+   def TestMultipleCandidateOwnersCompletenessPlanIsBlocked(self, tmp_path):
+      f = Write(
+         tmp_path / "main.py",
+         Src(
+            """
+            class Repo:
+               tableName = "x"
+
+            class Other:
+               tableName = "y"
+
+            def Run():
+               repo = Repo()
+               other = Other()
+               return repo.tableName, other.tableName
+            """
+         ),
+      )
+
+      result, _ = FindRefsByName([str(f)], "tableName")
+      plan = result.ToDict()["object_attribute_plan"]
+
+      assert plan["complete"] is False
+      assert "multiple_candidate_owners" in plan["blocked_reasons"]
+      assert plan["apply_allowed"] is False
+
+   def TestMissingDeclarationCompletenessPlanIsBlocked(self, tmp_path):
+      f = Write(
+         tmp_path / "main.py",
+         Src(
+            """
+            class Repo:
+               pass
+
+            def Run():
+               repo = Repo()
+               return repo.tableName
+            """
+         ),
+      )
+
+      result, _ = FindRefsByName([str(f)], "tableName")
+      plan = result.ToDict()["object_attribute_plan"]
+
+      assert plan["complete"] is False
+      assert "missing_declaration" in plan["blocked_reasons"]
+      assert plan["apply_allowed"] is False
+
+   def TestStatementComposerStyleCompletenessPlanRemainsIncomplete(self, tmp_path):
+      f = Write(tmp_path / "main.py", "def Run(repo):\n   return repo.tableName\n")
+
+      result, _ = FindRefsByName([str(f)], "tableName")
+      plan = result.ToDict()["object_attribute_plan"]
+
+      assert plan["complete"] is False
+      assert plan["apply_allowed"] is False
+
    def TestSameFileClassAttributeReadResolvesReadOnly(self, tmp_path):
       f = Write(
          tmp_path / "main.py",
