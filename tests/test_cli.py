@@ -490,14 +490,34 @@ class TestRenameAttributeSkeletonCli:
       )
 
       out = capsys.readouterr().out
-      data = json.loads(out)
       assert rc == 0
-      assert data["requested_class"] == "Repo"
-      assert data["name"] == "tableName"
-      assert data["new_name"] == "TableName"
-      assert data["eligible_for_diff"] is True
-      assert data["blocked_reasons"] == []
-      assert data["object_attribute_plan"]["complete"] is True
+      assert f"--- a/{f}" in out
+      assert f"+++ b/{f}" in out
+      assert '-   tableName = "x"' in out
+      assert '+   TableName = "x"' in out
+      assert '-   return repo.tableName' in out
+      assert '+   return repo.TableName' in out
+      assert f.read_text(encoding="utf-8") == original
+
+   def TestSameFileDeclarationReadWriteRendersExpectedDiff(self, tmp_path, capsys):
+      f = Write(
+         tmp_path / "repo.py",
+         'class Repo:\n   tableName = "x"\n\ndef Run():\n   repo = Repo()\n   value = repo.tableName\n   repo.tableName = value\n   return "tableName"\n',
+      )
+      original = f.read_text(encoding="utf-8")
+
+      rc = Run(
+         "rename-attribute", str(f), "--class", "Repo",
+         "--name", "tableName", "--to", "TableName", "--diff",
+      )
+
+      out = capsys.readouterr().out
+      assert rc == 0
+      assert '-   value = repo.tableName' in out
+      assert '+   value = repo.TableName' in out
+      assert '-   repo.tableName = value' in out
+      assert '+   repo.TableName = value' in out
+      assert 'return "tableName"' in out
       assert f.read_text(encoding="utf-8") == original
 
 
@@ -523,9 +543,14 @@ class TestRenameAttributeSkeletonCli:
          "--diff",
       )
 
-      data = json.loads(capsys.readouterr().out)
+      out = capsys.readouterr().out
       assert rc == 0
-      assert data["eligible_for_diff"] is True
+      assert "repos.py" in out
+      assert "main.py" in out
+      assert '-   tableName = "x"' in out
+      assert '+   TableName = "x"' in out
+      assert '-   return repo.tableName' in out
+      assert '+   return repo.TableName' in out
       assert main.read_text(encoding="utf-8").endswith("repo.tableName\n")
 
    def TestRequestedClassMismatchBlocks(self, tmp_path, capsys):

@@ -31,10 +31,14 @@ Exit codes
 from __future__ import annotations
 
 import argparse
+import ast
+import difflib
+import io
 import json
 import re
 import sys
 import textwrap
+import tokenize
 from pathlib import Path
 
 from customfmt import __version__
@@ -840,8 +844,143 @@ def _CmdRenameAttribute(args: argparse.Namespace) -> int:
       new_name=args.new_name,
       paths=args.paths,
    )
-   print(_json.dumps(eligibility, indent=2))
-   return 0 if eligibility["eligible_for_diff"] else 2
+   if not eligibility["eligible_for_diff"]:
+      print(_json.dumps(eligibility, indent=2))
+      return 2
+
+   try:
+      print(_RenderRenameAttributeDiff(
+         eligibility["object_attribute_plan"], args.name, args.new_name
+      ), end="")
+   except (OSError, UnicodeDecodeError, ValueError, SyntaxError) as exc:
+      print(f"customfmt: error: {exc}", file=sys.stderr)
+      return 2
+   return 0
+
+
+
+def _RenderRenameAttributeDiff(
+   object_attribute_plan: dict, name: str, new_name: str
+) -> str:
+   edits_by_file: dict[Path, list[dict]] = {}
+   for edit in _RenameAttributeTokenEdits(object_attribute_plan, name, new_name):
+      path = Path(edit["file"])
+      edits_by_file.setdefault(path, []).append(edit)
+
+   chunks: list[str] = []
+   for path in sorted(edits_by_file):
+      original = ReadUtf8Text(path)
+      rewritten = _RenderRenameAttributeFile(path, original, edits_by_file[path])
+      ast.parse(rewritten, filename=str(path))
+      if original == rewritten:
+         continue
+      chunks.append(
+         "".join(
+            difflib.unified_diff(
+               original.splitlines(keepends=True),
+               rewritten.splitlines(keepends=True),
+               fromfile=f"a/{path}",
+               tofile=f"b/{path}",
+            )
+         )
+      )
+   return "".join(chunks)
+
+
+def _RenameAttributeTokenEdits(
+   object_attribute_plan: dict, name: str, new_name: str
+) -> list[dict]:
+   edits: list[dict] = []
+   seen: set[tuple[str, int, int]] = set()
+   for ref in object_attribute_plan.get("resolved_read_refs", []):
+      edits.append(_RenameAttributeRefEdit(ref, name, new_name))
+   for ref in object_attribute_plan.get("resolved_write_refs", []):
+      edits.append(_RenameAttributeRefEdit(ref, name, new_name))
+   for ref in object_attribute_plan.get("resolved_read_refs", []):
+      target = ref.get("resolved_to")
+      if isinstance(target, dict):
+         key = (target.get("file"), target.get("line"), target.get("col"))
+         if key not in seen:
+            seen.add(key)
+            edits.append({
+               "file": target.get("file"),
+               "line": target.get("line"),
+               "col":  target.get("col"),
+               "old":  name,
+               "new":  new_name,
+            })
+   for ref in object_attribute_plan.get("resolved_write_refs", []):
+      target = ref.get("resolved_to")
+      if isinstance(target, dict):
+         key = (target.get("file"), target.get("line"), target.get("col"))
+         if key not in seen:
+            seen.add(key)
+            edits.append({
+               "file": target.get("file"),
+               "line": target.get("line"),
+               "col":  target.get("col"),
+               "old":  name,
+               "new":  new_name,
+            })
+   return edits
+
+
+def _RenameAttributeRefEdit(ref: dict, name: str, new_name: str) -> dict:
+   path = Path(ref["file"])
+   text = ReadUtf8Text(path)
+   lines = text.splitlines()
+   line_no = int(ref["line"])
+   base_col = int(ref["col"])
+   if line_no < 1 or line_no > len(lines):
+      raise ValueError(f"{path}:{line_no}:{base_col}: planned attribute edit is outside file")
+   line = lines[line_no - 1]
+   attr_col = _FindAttributeTokenCol(line, base_col, name)
+   return {
+      "file": str(path),
+      "line": line_no,
+      "col":  attr_col,
+      "old":  name,
+      "new":  new_name,
+   }
+
+
+def _FindAttributeTokenCol(line: str, base_col: int, name: str) -> int:
+   needle = f".{name}"
+   pos = line.find(needle, base_col)
+   if pos < 0:
+      raise ValueError(f"planned attribute edit expected {needle!r}")
+   return pos + 1
+
+
+def _RenderRenameAttributeFile(path: Path, original: str, edits: list[dict]) -> str:
+   edit_map: dict[tuple[int, int], dict] = {}
+   for edit in edits:
+      key = (int(edit["line"]), int(edit["col"]))
+      existing = edit_map.get(key)
+      if existing is not None and existing != edit:
+         raise ValueError(f"{path}:{key[0]}:{key[1]}: overlapping rename-attribute edits")
+      edit_map[key] = edit
+
+   seen: set[tuple[int, int]] = set()
+   rendered: list[tokenize.TokenInfo] = []
+   for token in tokenize.generate_tokens(io.StringIO(original).readline):
+      edit = edit_map.get(token.start)
+      if edit is None:
+         rendered.append(token)
+         continue
+      if token.type != tokenize.NAME or token.string != edit["old"]:
+         raise ValueError(
+            f"{path}:{edit['line']}:{edit['col']}: planned edit expected "
+            f"{edit['old']!r}, found {token.string!r}"
+         )
+      seen.add(token.start)
+      rendered.append(token._replace(string=edit["new"]))
+
+   missing = sorted(set(edit_map) - seen)
+   if missing:
+      line, col = missing[0]
+      raise ValueError(f"{path}:{line}:{col}: planned edit does not match a token")
+   return tokenize.untokenize(rendered)
 
 
 def _RenameAttributeEligibility(
