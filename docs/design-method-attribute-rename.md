@@ -462,11 +462,12 @@ The `closeBreacket` typo/API correction remains manual. It is not an object
 attribute rename, and it must not be inferred from casing rules.
 
 
-### Phase 4E rename-attribute diff-only skeleton
+### Phase 4F rename-attribute read-only diff eligibility
 
-Phase 4E introduces the CLI shape for future object-attribute diff planning,
-but it still does not implement token edits, apply behavior, or file writes.
-The preferred command is:
+Phase 4F wires the `rename-attribute --diff` CLI to the existing read-only
+`object_attribute_plan` diagnostics. It reports whether the requested owner and
+attribute are eligible for a future token diff, but it still does not render
+token edits, implement apply behavior, or write files. The command is:
 
 ```bash
 customfmt rename-attribute <root> --class Repo --name tableName --to TableName --diff
@@ -478,17 +479,22 @@ begin:
 * `--class Repo` for the proven owner class.
 * `--name tableName` for the old attribute spelling.
 * `--to TableName` for the new attribute spelling.
-* `--diff` because Phase 4E is diff-only design/skeleton work.
+* `--diff` because Phase 4F is read-only eligibility work.
 
 Apply remains intentionally unsupported. `rename-attribute --apply` must refuse
-with exit code 2 and write nothing. The command must not call the local
+with exit code 2 and write nothing. A successful eligibility response exits 0
+and prints JSON with `requested_class`, `name`, `new_name`,
+`eligible_for_diff`, `object_attribute_plan`, `blocked_reasons`, and `status`;
+blocked or ineligible responses exit 2 and still write nothing. The command
+must not call the local
 `customfmt rename` planner, must not broaden `rename-symbol`, and must not use
 text replacement.
 
 #### Diff eligibility contract
 
-A future `rename-attribute --diff` implementation may render a unified diff
-only after project-wide diagnostics prove one complete token plan:
+A future `rename-attribute --diff` renderer may render a unified diff only
+after project-wide diagnostics prove one complete token plan. Phase 4F only
+reports this eligibility:
 
 1. The declaration is found on the explicit owner class.
 2. All reads and writes are resolved to that declaration.
