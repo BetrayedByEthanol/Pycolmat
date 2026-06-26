@@ -473,7 +473,7 @@ class TestRenameAttributeSkeletonCli:
       assert rc == 2
       assert "rename-attribute requires --name, --to" in err
 
-   def TestReportsDiffNotImplementedAndDoesNotWrite(self, tmp_path, capsys):
+   def TestReportsEligibleDiffReadOnlyAndDoesNotWrite(self, tmp_path, capsys):
       f = self.WriteRepoProject(tmp_path)
       original = f.read_text(encoding="utf-8")
 
@@ -489,11 +489,159 @@ class TestRenameAttributeSkeletonCli:
          "--diff",
       )
 
-      err = capsys.readouterr().err
-      assert rc == 2
-      assert "rename-attribute --diff is not implemented yet" in err
-      assert "future diff planning must prove declaration" in err
+      out = capsys.readouterr().out
+      data = json.loads(out)
+      assert rc == 0
+      assert data["requested_class"] == "Repo"
+      assert data["name"] == "tableName"
+      assert data["new_name"] == "TableName"
+      assert data["eligible_for_diff"] is True
+      assert data["blocked_reasons"] == []
+      assert data["object_attribute_plan"]["complete"] is True
       assert f.read_text(encoding="utf-8") == original
+
+
+   def TestImportedClassAttributeIsEligible(self, tmp_path, capsys):
+      pkg = tmp_path / "pkg"
+      pkg.mkdir()
+      Write(pkg / "__init__.py", "")
+      Write(pkg / "repos.py", 'class Repo:\n   tableName = "x"\n')
+      main = Write(
+         pkg / "main.py",
+         'from pkg.repos import Repo\n\ndef Run():\n   repo = Repo()\n   return repo.tableName\n',
+      )
+
+      rc = Run(
+         "rename-attribute",
+         str(pkg),
+         "--class",
+         "Repo",
+         "--name",
+         "tableName",
+         "--to",
+         "TableName",
+         "--diff",
+      )
+
+      data = json.loads(capsys.readouterr().out)
+      assert rc == 0
+      assert data["eligible_for_diff"] is True
+      assert main.read_text(encoding="utf-8").endswith("repo.tableName\n")
+
+   def TestRequestedClassMismatchBlocks(self, tmp_path, capsys):
+      f = self.WriteRepoProject(tmp_path)
+
+      rc = Run(
+         "rename-attribute", str(f), "--class", "Other",
+         "--name", "tableName", "--to", "TableName", "--diff",
+      )
+
+      data = json.loads(capsys.readouterr().out)
+      assert rc == 2
+      assert data["eligible_for_diff"] is False
+      assert "requested_class_mismatch" in data["blocked_reasons"]
+
+   def TestNewNameCollisionBlocks(self, tmp_path, capsys):
+      f = Write(
+         tmp_path / "repo.py",
+         'class Repo:\n   tableName = "x"\n   TableName = "y"\n\ndef Run():\n   repo = Repo()\n   return repo.tableName\n',
+      )
+
+      rc = Run(
+         "rename-attribute", str(f), "--class", "Repo",
+         "--name", "tableName", "--to", "TableName", "--diff",
+      )
+
+      data = json.loads(capsys.readouterr().out)
+      assert rc == 2
+      assert "new_name_collision" in data["blocked_reasons"]
+
+   def TestMissingDeclarationBlocks(self, tmp_path, capsys):
+      f = Write(
+         tmp_path / "repo.py",
+         'class Repo:\n   pass\n\ndef Run():\n   repo = Repo()\n   return repo.tableName\n',
+      )
+
+      rc = Run(
+         "rename-attribute", str(f), "--class", "Repo",
+         "--name", "tableName", "--to", "TableName", "--diff",
+      )
+
+      data = json.loads(capsys.readouterr().out)
+      assert rc == 2
+      assert "missing_declaration" in data["blocked_reasons"]
+
+   def TestUnknownReceiverBlocks(self, tmp_path, capsys):
+      f = Write(tmp_path / "repo.py", 'def Run(repo):\n   return repo.tableName\n')
+
+      rc = Run(
+         "rename-attribute", str(f), "--class", "Repo",
+         "--name", "tableName", "--to", "TableName", "--diff",
+      )
+
+      data = json.loads(capsys.readouterr().out)
+      assert rc == 2
+      assert "unknown_receiver" in data["blocked_reasons"]
+
+   def TestFutureModeOwnerBlocks(self, tmp_path, capsys):
+      f = Write(
+         tmp_path / "repo.py",
+         'from dataclasses import dataclass\n\n@dataclass\nclass Repo:\n   tableName: str\n\ndef Run():\n   repo = Repo("x")\n   return repo.tableName\n',
+      )
+
+      rc = Run(
+         "rename-attribute", str(f), "--class", "Repo",
+         "--name", "tableName", "--to", "TableName", "--diff",
+      )
+
+      data = json.loads(capsys.readouterr().out)
+      assert rc == 2
+      assert "future_mode_owner" in data["blocked_reasons"]
+
+   def TestInheritedAttributeBlocks(self, tmp_path, capsys):
+      f = Write(
+         tmp_path / "repo.py",
+         'class Base:\n   tableName = "x"\n\nclass Repo(Base):\n   pass\n\ndef Run():\n   repo = Repo()\n   return repo.tableName\n',
+      )
+
+      rc = Run(
+         "rename-attribute", str(f), "--class", "Repo",
+         "--name", "tableName", "--to", "TableName", "--diff",
+      )
+
+      data = json.loads(capsys.readouterr().out)
+      assert rc == 2
+      assert "inherited_attribute" in data["blocked_reasons"]
+
+   def TestDynamicHelperBlocks(self, tmp_path, capsys):
+      f = Write(
+         tmp_path / "repo.py",
+         'class Repo:\n   tableName = "x"\n\ndef Run():\n   repo = Repo()\n   return getattr(repo, "tableName")\n',
+      )
+
+      rc = Run(
+         "rename-attribute", str(f), "--class", "Repo",
+         "--name", "tableName", "--to", "TableName", "--diff",
+      )
+
+      data = json.loads(capsys.readouterr().out)
+      assert rc == 2
+      assert "dynamic_attribute_helper" in data["blocked_reasons"]
+
+   def TestStatementComposerStyleRepoFieldBlocks(self, tmp_path, capsys):
+      f = Write(
+         tmp_path / "repo.py",
+         'def Compose(repo):\n   return repo.tableName\n',
+      )
+
+      rc = Run(
+         "rename-attribute", str(f), "--class", "Repo",
+         "--name", "tableName", "--to", "TableName", "--diff",
+      )
+
+      data = json.loads(capsys.readouterr().out)
+      assert rc == 2
+      assert "unknown_receiver" in data["blocked_reasons"]
 
    def TestRejectsApplyAndDoesNotWrite(self, tmp_path, capsys):
       f = self.WriteRepoProject(tmp_path)

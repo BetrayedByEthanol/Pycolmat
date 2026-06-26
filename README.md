@@ -378,25 +378,28 @@ truth, then reports, renders, or applies exact token edit sites. If `--name`
 matches multiple supported definitions, the command returns an ambiguity error
 and requires `--symbol PATH:LINE:COL`.
 
-### `customfmt rename-attribute` — future object-attribute diff planning skeleton
+### `customfmt rename-attribute` — read-only object-attribute diff eligibility
 
 ```bash
 customfmt rename-attribute src/ --class Repo --name tableName --to TableName --diff
 ```
 
-`customfmt rename-attribute` is currently a Phase 4E skeleton for the future
-object-attribute rename planner. It validates that the caller provided an
-explicit owner class with `--class`, the old attribute spelling with `--name`,
-the new attribute spelling with `--to`, and the read-only `--diff` mode. It
-does not render token edits yet, does not apply changes, and never writes
-files.
+`customfmt rename-attribute --diff` now performs Phase 4F read-only
+eligibility checks for the future object-attribute diff renderer. It validates
+that the caller provided an explicit owner class with `--class`, the old
+attribute spelling with `--name`, the new attribute spelling with `--to`, and
+the read-only `--diff` mode, then reports JSON containing `requested_class`,
+`name`, `new_name`, `eligible_for_diff`, `object_attribute_plan`,
+`blocked_reasons`, and `status`. It does not render token diffs yet, does not
+apply changes, and never writes files.
 
 Object-attribute apply behavior is intentionally not implemented. `--apply`
-exits 2 and writes nothing. A later diff implementation must first prove a
-complete project-wide plan: declaration found on the explicit owner class, all
-reads and writes resolved, no dynamic refs, no unresolved refs, no external
-refs, no future-mode owner, no inherited attributes, no multiple candidate
-owners, and no collision with the new name. StatementComposer-style
+exits 2 and writes nothing. The eligibility check exits 0 only when diagnostics
+prove a complete project-wide plan: declaration found on the explicit owner
+class, all reads and writes resolved to that requested owner, no dynamic refs,
+no unresolved refs, no external refs, no future-mode owner, no inherited
+attributes, no multiple candidate owners, and no collision with the new name.
+StatementComposer-style
 `repo`/`model`/`condition` fields remain blocked without proven declarations.
 Diff-only support must land and be reviewable before any apply-capable object
 attribute mode is introduced.

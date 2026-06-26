@@ -785,6 +785,8 @@ def _CmdRenameSymbol(args: argparse.Namespace) -> int:
 
 
 def _CmdRenameAttribute(args: argparse.Namespace) -> int:
+   import json as _json
+
    missing: list[str] = []
    if not args.owner_class:
       missing.append("--class")
@@ -803,7 +805,7 @@ def _CmdRenameAttribute(args: argparse.Namespace) -> int:
    if args.apply:
       print(
          "customfmt: error: rename-attribute apply is not implemented; "
-         "only future diff planning is allowed",
+         "rename-attribute never writes files",
          file=sys.stderr,
       )
       return 2
@@ -816,14 +818,116 @@ def _CmdRenameAttribute(args: argparse.Namespace) -> int:
       )
       return 2
 
-   print(
-      "customfmt: error: rename-attribute --diff is not implemented yet; "
-      "future diff planning must prove declaration, resolved reads/writes, "
-      "no dynamic/unresolved/external refs, no future-mode owner, no inherited "
-      "attrs, no multiple candidate owners, and no new-name collision",
-      file=sys.stderr,
+   try:
+      result, disc_errors = FindRefsByName(args.paths, args.name)
+   except ValueError as exc:
+      print(f"customfmt: error: {exc}", file=sys.stderr)
+      return 2
+
+   if disc_errors:
+      for err in disc_errors:
+         print(f"customfmt: error: {err}", file=sys.stderr)
+      return 2
+   if result is None:
+      print("customfmt: no Python files found.", file=sys.stderr)
+      return 2
+
+   data = result.ToDict()
+   eligibility = _RenameAttributeEligibility(
+      data["object_attribute_plan"],
+      requested_class=args.owner_class,
+      name=args.name,
+      new_name=args.new_name,
+      paths=args.paths,
    )
-   return 2
+   print(_json.dumps(eligibility, indent=2))
+   return 0 if eligibility["eligible_for_diff"] else 2
+
+
+def _RenameAttributeEligibility(
+   object_attribute_plan: dict,
+   requested_class: str,
+   name: str,
+   new_name: str,
+   paths: list[str],
+) -> dict:
+   blocked_reasons = list(object_attribute_plan.get("blocked_reasons", []))
+   if not object_attribute_plan:
+      blocked_reasons.append("missing_declaration")
+
+   if not object_attribute_plan.get("complete", False):
+      if "incomplete_object_attribute_plan" not in blocked_reasons:
+         blocked_reasons.append("incomplete_object_attribute_plan")
+   if not object_attribute_plan.get("declaration_found", False):
+      if "missing_declaration" not in blocked_reasons:
+         blocked_reasons.append("missing_declaration")
+   if object_attribute_plan.get("apply_allowed", True):
+      blocked_reasons.append("apply_allowed_unexpected")
+   for key, reason in (
+      ("dynamic_refs", "dynamic_refs"),
+      ("unresolved_refs", "unresolved_refs"),
+      ("external_refs", "external_owner"),
+   ):
+      if object_attribute_plan.get(key) and reason not in blocked_reasons:
+         blocked_reasons.append(reason)
+   if object_attribute_plan.get("blocked", True):
+      if "blocked_object_attribute_plan" not in blocked_reasons:
+         blocked_reasons.append("blocked_object_attribute_plan")
+   if object_attribute_plan.get("future_mode_owner", False):
+      if "future_mode_owner" not in blocked_reasons:
+         blocked_reasons.append("future_mode_owner")
+
+   owners = _RenameAttributeResolvedOwners(object_attribute_plan)
+   if len(owners) > 1 and "multiple_candidate_owners" not in blocked_reasons:
+      blocked_reasons.append("multiple_candidate_owners")
+   if owners and owners != {requested_class}:
+      if "requested_class_mismatch" not in blocked_reasons:
+         blocked_reasons.append("requested_class_mismatch")
+
+   if _RenameAttributeHasOwnerDeclaration(paths, requested_class, new_name):
+      blocked_reasons.append("new_name_collision")
+
+   blocked_reasons = sorted(set(blocked_reasons))
+   eligible = not blocked_reasons
+   return {
+      "requested_class":       requested_class,
+      "name":                  name,
+      "new_name":              new_name,
+      "eligible_for_diff":     eligible,
+      "object_attribute_plan": object_attribute_plan,
+      "blocked_reasons":       blocked_reasons,
+      "status":                (
+         "read-only eligible for future diff"
+         if eligible
+         else "read-only blocked for future diff"
+      ),
+   }
+
+
+def _RenameAttributeResolvedOwners(object_attribute_plan: dict) -> set[str]:
+   owners: set[str] = set()
+   for key in ("resolved_read_refs", "resolved_write_refs"):
+      for ref in object_attribute_plan.get(key, []):
+         owner = ref.get("extra", {}).get("owner_class_name")
+         if isinstance(owner, str) and owner:
+            owners.add(owner)
+   return owners
+
+
+def _RenameAttributeHasOwnerDeclaration(
+   paths: list[str], requested_class: str, new_name: str
+) -> bool:
+   result, disc_errors = FindRefsByName(paths, new_name)
+   if result is None or disc_errors:
+      return False
+   for defn in result.ToDict().get("definitions", []):
+      if (
+         defn.get("kind") == "class_declaration"
+         and defn.get("name") == new_name
+         and defn.get("scope") == requested_class
+      ):
+         return True
+   return False
 
 
 def _WriteRenderedPlanFiles(rendered_by_file: dict[Path, str]) -> None:
