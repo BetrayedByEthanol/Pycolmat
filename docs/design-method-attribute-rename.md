@@ -535,6 +535,40 @@ The diff renderer must use the same validated token plan that a still-later
 apply implementation would use. Diff comes first so users can inspect the
 complete plan before any write-capable mode exists.
 
+### Phase 4J guarded rename-attribute apply
+
+Phase 4J makes `rename-attribute --apply` available for the exact same eligible
+object-attribute plans accepted by `--diff`. It does not broaden
+`customfmt rename`, does not add `--allow-incomplete`, and does not remove the
+strict statementComposer golden xfail. Apply mode reuses the same validated
+token edit plan as diff mode; there is no separate text-replacement path.
+
+The command is:
+
+```bash
+customfmt rename-attribute <root> --class Repo --name tableName --to TableName --apply
+```
+
+Apply remains blocked with exit code 2 unless project-wide diagnostics prove a
+complete plan: declaration found on the explicit owner class, all reads and
+writes resolved to that requested owner, no dynamic refs, no unresolved refs,
+no external refs, no future-mode owner, no inherited attributes, no multiple
+candidate owners, no new-name collision, and valid identifiers. Object/model/
+condition fields, statementComposer-style repository metadata, and other
+dynamic object fields remain blocked unless ownership and declarations are
+proven.
+
+The guarded writer renders all affected files in memory first, rejects an empty
+rendered plan, rejects overlapping or conflicting edits, and parses every
+rendered file with `ast.parse`. Only after every affected file validates may it
+write files. If a later write fails after any earlier file was written, it
+rolls those earlier files back to their original UTF-8 LF text and returns
+exit code 2. On success, it prints one line per changed file:
+
+```text
+renamed-attribute <path>
+```
+
 #### Phase 4E blockers
 
 The skeleton or future planner must refuse rather than guess when any of these

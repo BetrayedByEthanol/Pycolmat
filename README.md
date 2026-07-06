@@ -8,7 +8,7 @@ Works **alongside** Ruff and Pyright — it does not replace them.
 - `customfmt doctor` – reports read-only project readiness diagnostics
 - `customfmt refs` – discovers read-only project references as JSON
 - `customfmt rename-symbol` – emits a project-wide rename plan as JSON, renders a diff, or applies guarded token edits
-- `customfmt rename-attribute` – validates future object-attribute diff planning arguments; no edits or writes yet
+- `customfmt rename-attribute` – renders or applies guarded eligible object-attribute token plans
 
 ---
 
@@ -378,17 +378,20 @@ truth, then reports, renders, or applies exact token edit sites. If `--name`
 matches multiple supported definitions, the command returns an ambiguity error
 and requires `--symbol PATH:LINE:COL`.
 
-### `customfmt rename-attribute` — read-only object-attribute diff eligibility
+### `customfmt rename-attribute` — guarded object-attribute diff/apply
 
 ```bash
 customfmt rename-attribute src/ --class Repo --name tableName --to TableName --diff
+customfmt rename-attribute src/ --class Repo --name tableName --to TableName --apply
 ```
 
-`customfmt rename-attribute --diff` performs Phase 4H guarded
-eligibility checks and, when eligible, renders a non-empty unified diff without
-writing files. It validates that the caller provided an explicit owner class
-with `--class`, the old attribute spelling with `--name`, the new attribute
-spelling with `--to`, and the read-only `--diff` mode. `--class` must be a
+`customfmt rename-attribute` performs Phase 4J guarded eligibility checks and,
+when eligible, renders or applies a non-empty token plan. `--diff` prints a
+unified diff without writing files. `--apply` writes only after the same token
+plan validates successfully for every affected file. It validates that the
+caller provided an explicit owner class with `--class`, the old attribute
+spelling with `--name`, the new attribute spelling with `--to`, and either
+`--diff` or `--apply`. `--class` must be a
 valid simple Python class identifier for now; `--name` and `--to` must be valid
 Python identifiers. Invalid identifiers are rejected with exit 2 before
 planning or rendering. Blocked plans report JSON
@@ -400,27 +403,18 @@ internal eligible plan would render an empty diff, the command exits 2 instead
 of treating that as success. Weird spaced attribute syntax such as
 `repo . tableName` is not supported by the diff renderer.
 
-Object-attribute apply behavior is intentionally not implemented. The future
-command form is:
-
-```bash
-customfmt rename-attribute <root> --class Repo --name tableName --to TableName --apply
-```
-
-Status: this command is still refused until Phase 4J. `--apply` exits 2 and
-writes nothing for safe same-file plans, imported multi-file plans, blocked
-plans, and invalid identifiers. `rename-attribute` must not support
-`--allow-incomplete`. The eligibility check exits 0 only when diagnostics prove
-a complete project-wide plan: declaration found on the explicit owner class, all
-reads and writes resolved to that requested owner, no dynamic refs, no
-unresolved refs, no external refs, no future-mode owner, no inherited
-attributes, no multiple candidate owners, and no collision with the new name.
+`--apply` is available only for the same eligible plans as `--diff`.
+`rename-attribute` does not support `--allow-incomplete`; incomplete plans are
+blocked rather than partially applied. The eligibility check exits 0 only when
+diagnostics prove a complete project-wide plan: declaration found on the
+explicit owner class, all reads and writes resolved to that requested owner, no
+dynamic refs, no unresolved refs, no external refs, no future-mode owner, no
+inherited attributes, no multiple candidate owners, and no collision with the
+new name.
 StatementComposer-style
 `repo`/`model`/`condition` fields remain blocked without proven declarations.
 
-Future apply-capable object attribute mode must land separately after diff-only
-support is reviewable. Its apply contract is deliberately stricter than simple
-write-through rendering:
+Apply is deliberately stricter than simple write-through rendering:
 
 * Apply must reuse the exact same token plan as `--diff`.
 * Apply must render all affected files in memory before writing any file.
@@ -430,6 +424,9 @@ write-through rendering:
 * Apply must write files only after full validation succeeds.
 * Apply must roll back if any partial write failure occurs.
 * Apply must not support `--allow-incomplete`.
+* Apply prints `renamed-attribute <path>` once for each changed file and exits 0
+  only after successful writes; blocked, ineligible, validation, renderer, and
+  write errors exit 2 and preserve the original files.
 
 #### `rename-symbol` v1 workflow examples
 

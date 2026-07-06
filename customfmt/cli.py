@@ -11,7 +11,7 @@ Commands
   customfmt resolve [--pretty] [--output PATH] <paths...>
   customfmt refs [--name NAME | --symbol PATH:LINE:COL] [--pretty] [--output PATH] <paths...>
   customfmt rename-symbol [--name NAME | --symbol PATH:LINE:COL] --to NAME [--pretty] [--output PATH] [--diff | --apply] [--allow-incomplete] <paths...>
-  customfmt rename-attribute --class CLASS --name NAME --to NAME --diff <paths...>
+  customfmt rename-attribute --class CLASS --name NAME --to NAME [--diff | --apply] <paths...>
   customfmt deps [--json | --pretty] [--output PATH] <paths...>
 
 Aliases (console_scripts)
@@ -357,8 +357,8 @@ def _BuildParser(prog: str = "customfmt") -> argparse.ArgumentParser:
       help="Validate future object-attribute diff planning arguments.",
       description=(
          "Validate the explicit owner class and attribute names for a future "
-         "project-wide object-attribute diff plan. Diff mode renders token "
-         "edits read-only; apply changes and file writes are not implemented."
+         "project-wide object-attribute rename plan. Diff mode renders token "
+         "edits read-only; apply writes guarded eligible plans."
       ),
    )
    attr_p.add_argument(
@@ -393,7 +393,7 @@ def _BuildParser(prog: str = "customfmt") -> argparse.ArgumentParser:
    attr_mode.add_argument(
       "--apply",
       action="store_true",
-      help="Unsupported. Object-attribute apply behavior is not implemented.",
+      help="Apply guarded token edits from an eligible object-attribute plan.",
    )
 
    # -- deps -----------------------------------------------------------------
@@ -814,18 +814,9 @@ def _CmdRenameAttribute(args: argparse.Namespace) -> int:
       print(f"customfmt: error: {identifier_error}", file=sys.stderr)
       return 2
 
-   if args.apply:
+   if not args.diff and not args.apply:
       print(
-         "customfmt: error: rename-attribute apply is not implemented; "
-         "rename-attribute never writes files",
-         file=sys.stderr,
-      )
-      return 2
-
-   if not args.diff:
-      print(
-         "customfmt: error: rename-attribute requires --diff; apply/write behavior "
-         "is not implemented",
+         "customfmt: error: rename-attribute requires --diff or --apply",
          file=sys.stderr,
       )
       return 2
@@ -856,21 +847,41 @@ def _CmdRenameAttribute(args: argparse.Namespace) -> int:
       print(_json.dumps(eligibility, indent=2))
       return 2
 
+   if args.diff:
+      try:
+         rendered_diff = _RenderRenameAttributeDiff(
+            eligibility["object_attribute_plan"], args.name, args.new_name
+         )
+         if not rendered_diff:
+            print(
+               "customfmt: error: internal rename-attribute plan error: "
+               "eligible_for_diff was true but rendered diff was empty",
+               file=sys.stderr,
+            )
+            return 2
+         print(rendered_diff, end="")
+      except (OSError, UnicodeDecodeError, ValueError, SyntaxError) as exc:
+         print(f"customfmt: error: {exc}", file=sys.stderr)
+         return 2
+      return 0
+
    try:
-      rendered_diff = _RenderRenameAttributeDiff(
+      rendered_by_file = _RenderRenameAttributeTextByFile(
          eligibility["object_attribute_plan"], args.name, args.new_name
       )
-      if not rendered_diff:
+      if not rendered_by_file:
          print(
             "customfmt: error: internal rename-attribute plan error: "
-            "eligible_for_diff was true but rendered diff was empty",
+            "eligible_for_diff was true but rendered plan was empty",
             file=sys.stderr,
          )
          return 2
-      print(rendered_diff, end="")
+      _WriteRenderedPlanFiles(rendered_by_file)
    except (OSError, UnicodeDecodeError, ValueError, SyntaxError) as exc:
       print(f"customfmt: error: {exc}", file=sys.stderr)
       return 2
+   for path in rendered_by_file:
+      print(f"renamed-attribute {path}")
    return 0
 
 
@@ -897,18 +908,14 @@ def _IsValidIdentifier(value: str) -> bool:
 def _RenderRenameAttributeDiff(
    object_attribute_plan: dict, name: str, new_name: str
 ) -> str:
-   edits_by_file: dict[Path, list[dict]] = {}
-   for edit in _RenameAttributeTokenEdits(object_attribute_plan, name, new_name):
-      path = Path(edit["file"])
-      edits_by_file.setdefault(path, []).append(edit)
+   rendered_by_file = _RenderRenameAttributeTextByFile(
+      object_attribute_plan, name, new_name
+   )
 
    chunks: list[str] = []
-   for path in sorted(edits_by_file):
+   for path in sorted(rendered_by_file):
       original = ReadUtf8Text(path)
-      rewritten = _RenderRenameAttributeFile(path, original, edits_by_file[path])
-      ast.parse(rewritten, filename=str(path))
-      if original == rewritten:
-         continue
+      rewritten = rendered_by_file[path]
       chunks.append(
          "".join(
             difflib.unified_diff(
@@ -920,6 +927,25 @@ def _RenderRenameAttributeDiff(
          )
       )
    return "".join(chunks)
+
+
+def _RenderRenameAttributeTextByFile(
+   object_attribute_plan: dict, name: str, new_name: str
+) -> dict[Path, str]:
+   edits_by_file: dict[Path, list[dict]] = {}
+   for edit in _RenameAttributeTokenEdits(object_attribute_plan, name, new_name):
+      path = Path(edit["file"])
+      edits_by_file.setdefault(path, []).append(edit)
+
+   rendered_by_file: dict[Path, str] = {}
+   for path in sorted(edits_by_file):
+      original = ReadUtf8Text(path)
+      rewritten = _RenderRenameAttributeFile(path, original, edits_by_file[path])
+      ast.parse(rewritten, filename=str(path))
+      if original == rewritten:
+         continue
+      rendered_by_file[path] = rewritten
+   return rendered_by_file
 
 
 def _RenameAttributeTokenEdits(
