@@ -357,8 +357,8 @@ def _BuildParser(prog: str = "customfmt") -> argparse.ArgumentParser:
       help="Validate future object-attribute diff planning arguments.",
       description=(
          "Validate the explicit owner class and attribute names for a future "
-         "project-wide object-attribute diff plan. This skeleton does not "
-         "render token edits, apply changes, or write files."
+         "project-wide object-attribute diff plan. Diff mode renders token "
+         "edits read-only; apply changes and file writes are not implemented."
       ),
    )
    attr_p.add_argument(
@@ -388,7 +388,7 @@ def _BuildParser(prog: str = "customfmt") -> argparse.ArgumentParser:
    attr_mode.add_argument(
       "--diff",
       action="store_true",
-      help="Future diff-only mode; currently validates arguments and exits not implemented.",
+      help="Render a guarded read-only unified diff without writing files.",
    )
    attr_mode.add_argument(
       "--apply",

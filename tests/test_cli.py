@@ -521,15 +521,24 @@ class TestRenameAttributeSkeletonCli:
       assert f.read_text(encoding="utf-8") == original
 
 
-   def TestImportedClassAttributeIsEligible(self, tmp_path, capsys):
+   def WriteImportedRepoProject(self, tmp_path):
       pkg = tmp_path / "pkg"
       pkg.mkdir()
-      Write(pkg / "__init__.py", "")
-      Write(pkg / "repos.py", 'class Repo:\n   tableName = "x"\n')
-      main = Write(
+      init_file = Write(pkg / "__init__.py", "")
+      repo_file = Write(pkg / "repos.py", 'class Repo:\n   tableName = "x"\n')
+      main_file = Write(
          pkg / "main.py",
          'from pkg.repos import Repo\n\ndef Run():\n   repo = Repo()\n   return repo.tableName\n',
       )
+      return pkg, [init_file, repo_file, main_file]
+
+   def AssertFilesUnchanged(self, files, originals):
+      for f in files:
+         assert f.read_text(encoding="utf-8") == originals[f]
+
+   def TestImportedClassAttributeIsEligible(self, tmp_path, capsys):
+      pkg, files = self.WriteImportedRepoProject(tmp_path)
+      originals = {f: f.read_text(encoding="utf-8") for f in files}
 
       rc = Run(
          "rename-attribute",
@@ -551,7 +560,7 @@ class TestRenameAttributeSkeletonCli:
       assert '+   TableName = "x"' in out
       assert '-   return repo.tableName' in out
       assert '+   return repo.TableName' in out
-      assert main.read_text(encoding="utf-8").endswith("repo.tableName\n")
+      self.AssertFilesUnchanged(files, originals)
 
    def TestRequestedClassMismatchBlocks(self, tmp_path, capsys):
       f = self.WriteRepoProject(tmp_path)
@@ -759,7 +768,24 @@ class TestRenameAttributeSkeletonCli:
       assert rc == 2
       assert "planned attribute edit expected" in err
 
-   def TestRejectsApplyAndDoesNotWrite(self, tmp_path, capsys):
+   def TestFailedDiffRendererDoesNotWrite(self, tmp_path, capsys):
+      f = Write(
+         tmp_path / "repo.py",
+         'class Repo:\n   tableName = "x"\n\ndef Run():\n   repo = Repo()\n   return repo . tableName\n',
+      )
+      original = f.read_text(encoding="utf-8")
+
+      rc = Run(
+         "rename-attribute", str(f), "--class", "Repo",
+         "--name", "tableName", "--to", "TableName", "--diff",
+      )
+
+      err = capsys.readouterr().err
+      assert rc == 2
+      assert "planned attribute edit expected" in err
+      assert f.read_text(encoding="utf-8") == original
+
+   def TestSafeSameFileApplyIsRefusedAndDoesNotWrite(self, tmp_path, capsys):
       f = self.WriteRepoProject(tmp_path)
       original = f.read_text(encoding="utf-8")
 
@@ -778,4 +804,51 @@ class TestRenameAttributeSkeletonCli:
       err = capsys.readouterr().err
       assert rc == 2
       assert "rename-attribute apply is not implemented" in err
+      assert f.read_text(encoding="utf-8") == original
+
+   def TestImportedMultiFileApplyIsRefusedAndDoesNotWrite(self, tmp_path, capsys):
+      pkg, files = self.WriteImportedRepoProject(tmp_path)
+      originals = {f: f.read_text(encoding="utf-8") for f in files}
+
+      rc = Run(
+         "rename-attribute", str(pkg), "--class", "Repo",
+         "--name", "tableName", "--to", "TableName", "--apply",
+      )
+
+      err = capsys.readouterr().err
+      assert rc == 2
+      assert "rename-attribute apply is not implemented" in err
+      self.AssertFilesUnchanged(files, originals)
+
+   def TestBlockedPlanApplyIsRefusedAndDoesNotWrite(self, tmp_path, capsys):
+      f = Write(
+         tmp_path / "repo.py",
+         'class Repo:\n   tableName = "x"\n\ndef Run(repo):\n   return repo.tableName\n',
+      )
+      original = f.read_text(encoding="utf-8")
+
+      rc = Run(
+         "rename-attribute", str(f), "--class", "Repo",
+         "--name", "tableName", "--to", "TableName", "--apply",
+      )
+
+      err = capsys.readouterr().err
+      assert rc == 2
+      assert "rename-attribute apply is not implemented" in err
+      assert f.read_text(encoding="utf-8") == original
+
+   def TestInvalidIdentifierApplyIsRefusedAndDoesNotWrite(self, tmp_path, capsys):
+      f = self.WriteRepoProject(tmp_path)
+      original = f.read_text(encoding="utf-8")
+
+      rc = Run(
+         "rename-attribute", str(f), "--class", "Repo",
+         "--name", "tableName", "--to", "Table-Name", "--apply",
+      )
+
+      captured = capsys.readouterr()
+      assert rc == 2
+      assert "--to must be a valid identifier" in captured.err
+      assert "apply is not implemented" not in captured.err
+      assert captured.out == ""
       assert f.read_text(encoding="utf-8") == original
