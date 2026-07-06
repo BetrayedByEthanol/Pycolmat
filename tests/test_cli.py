@@ -20,6 +20,7 @@ from pathlib import Path
 
 import pytest
 
+import customfmt.cli as Cli
 from customfmt.cli import Main, MainCheck, MainFix
 
 # ---------------------------------------------------------------------------
@@ -785,9 +786,11 @@ class TestRenameAttributeSkeletonCli:
       assert "planned attribute edit expected" in err
       assert f.read_text(encoding="utf-8") == original
 
-   def TestSafeSameFileApplyIsRefusedAndDoesNotWrite(self, tmp_path, capsys):
-      f = self.WriteRepoProject(tmp_path)
-      original = f.read_text(encoding="utf-8")
+   def TestSafeSameFileApplyRewritesDeclarationReadWrite(self, tmp_path, capsys):
+      f = Write(
+         tmp_path / "repo.py",
+         'class Repo:\n   tableName = "x"\n\ndef Run():\n   repo = Repo()\n   value = repo.tableName\n   repo.tableName = value\n   return "tableName"\n',
+      )
 
       rc = Run(
          "rename-attribute",
@@ -801,26 +804,56 @@ class TestRenameAttributeSkeletonCli:
          "--apply",
       )
 
-      err = capsys.readouterr().err
-      assert rc == 2
-      assert "rename-attribute apply is not implemented" in err
-      assert f.read_text(encoding="utf-8") == original
+      out = capsys.readouterr().out
+      assert rc == 0
+      assert f"renamed-attribute {f}" in out
+      text = f.read_text(encoding="utf-8")
+      assert '   TableName = "x"' in text
+      assert "value = repo.TableName" in text
+      assert "repo.TableName = value" in text
+      assert 'return "tableName"' in text
 
-   def TestImportedMultiFileApplyIsRefusedAndDoesNotWrite(self, tmp_path, capsys):
-      pkg, files = self.WriteImportedRepoProject(tmp_path)
-      originals = {f: f.read_text(encoding="utf-8") for f in files}
+   def TestImportedMultiFileApplyRewritesBothFiles(self, tmp_path, capsys):
+      pkg, _files = self.WriteImportedRepoProject(tmp_path)
 
       rc = Run(
          "rename-attribute", str(pkg), "--class", "Repo",
          "--name", "tableName", "--to", "TableName", "--apply",
       )
 
-      err = capsys.readouterr().err
-      assert rc == 2
-      assert "rename-attribute apply is not implemented" in err
-      self.AssertFilesUnchanged(files, originals)
+      out = capsys.readouterr().out
+      assert rc == 0
+      assert "repos.py" in out
+      assert "main.py" in out
+      assert '   TableName = "x"' in (pkg / "repos.py").read_text(encoding="utf-8")
+      assert "return repo.TableName" in (pkg / "main.py").read_text(encoding="utf-8")
 
-   def TestBlockedPlanApplyIsRefusedAndDoesNotWrite(self, tmp_path, capsys):
+   def TestApplyKeepsStringLiteralAndCommentOldSpelling(self, tmp_path, capsys):
+      f = self.WriteRepoProject(tmp_path)
+      f.write_text(
+         'class Repo:\n   tableName = "x"\n\ndef Run():\n   repo = Repo()\n   # tableName stays\n   text = "tableName"\n   return repo.tableName\n',
+         encoding="utf-8",
+      )
+
+      rc = Run(
+         "rename-attribute",
+         str(f),
+         "--class",
+         "Repo",
+         "--name",
+         "tableName",
+         "--to",
+         "TableName",
+         "--apply",
+      )
+
+      assert rc == 0
+      text = f.read_text(encoding="utf-8")
+      assert "# tableName stays" in text
+      assert 'text = "tableName"' in text
+      assert "return repo.TableName" in text
+
+   def TestBlockedUnknownReceiverApplyRefusesAndDoesNotWrite(self, tmp_path, capsys):
       f = Write(
          tmp_path / "repo.py",
          'class Repo:\n   tableName = "x"\n\ndef Run(repo):\n   return repo.tableName\n',
@@ -832,9 +865,67 @@ class TestRenameAttributeSkeletonCli:
          "--name", "tableName", "--to", "TableName", "--apply",
       )
 
+      out = capsys.readouterr().out
+      assert rc == 2
+      assert "unknown_receiver" in out
+      assert f.read_text(encoding="utf-8") == original
+
+   @pytest.mark.parametrize(
+      ("source", "reason"),
+      [
+         (
+            'from dataclasses import dataclass\n\n@dataclass\nclass Repo:\n   tableName: str\n\ndef Run():\n   repo = Repo("x")\n   return repo.tableName\n',
+            "future_mode_owner",
+         ),
+         (
+            'class Base:\n   tableName = "x"\n\nclass Repo(Base):\n   pass\n\ndef Run():\n   repo = Repo()\n   return repo.tableName\n',
+            "inherited_attribute",
+         ),
+         (
+            'class Repo:\n   tableName = "x"\n\ndef Run():\n   repo = Repo()\n   return getattr(repo, "tableName")\n',
+            "dynamic_attribute_helper",
+         ),
+         (
+            'class Repo:\n   tableName = "x"\n   TableName = "y"\n\ndef Run():\n   repo = Repo()\n   return repo.tableName\n',
+            "new_name_collision",
+         ),
+         (
+            'def Compose(repo):\n   return repo.tableName\n',
+            "unknown_receiver",
+         ),
+      ],
+   )
+   def TestBlockedApplyCasesRefuseAndWriteNothing(
+      self, tmp_path, capsys, source, reason
+   ):
+      f = Write(tmp_path / "repo.py", source)
+      original = f.read_text(encoding="utf-8")
+
+      rc = Run(
+         "rename-attribute", str(f), "--class", "Repo",
+         "--name", "tableName", "--to", "TableName", "--apply",
+      )
+
+      out = capsys.readouterr().out
+      assert rc == 2
+      assert reason in out
+      assert f.read_text(encoding="utf-8") == original
+
+   def TestRendererFailureApplyRefusesAndDoesNotWrite(self, tmp_path, capsys):
+      f = Write(
+         tmp_path / "repo.py",
+         'class Repo:\n   tableName = "x"\n\ndef Run():\n   repo = Repo()\n   return repo . tableName\n',
+      )
+      original = f.read_text(encoding="utf-8")
+
+      rc = Run(
+         "rename-attribute", str(f), "--class", "Repo",
+         "--name", "tableName", "--to", "TableName", "--apply",
+      )
+
       err = capsys.readouterr().err
       assert rc == 2
-      assert "rename-attribute apply is not implemented" in err
+      assert "planned attribute edit expected" in err
       assert f.read_text(encoding="utf-8") == original
 
    def TestInvalidIdentifierApplyIsRefusedAndDoesNotWrite(self, tmp_path, capsys):
@@ -852,3 +943,27 @@ class TestRenameAttributeSkeletonCli:
       assert "apply is not implemented" not in captured.err
       assert captured.out == ""
       assert f.read_text(encoding="utf-8") == original
+
+   def TestWriteFailureApplyRollsBackPartialWrites(self, tmp_path, capsys, monkeypatch):
+      pkg, files = self.WriteImportedRepoProject(tmp_path)
+      originals = {f: f.read_text(encoding="utf-8") for f in files}
+      calls = []
+      real_write = Cli.WriteUtf8Lf
+
+      def FailSecondWrite(path, text):
+         calls.append(Path(path).name)
+         if len(calls) == 2:
+            raise OSError("simulated write failure")
+         return real_write(path, text)
+
+      monkeypatch.setattr(Cli, "WriteUtf8Lf", FailSecondWrite)
+
+      rc = Run(
+         "rename-attribute", str(pkg), "--class", "Repo",
+         "--name", "tableName", "--to", "TableName", "--apply",
+      )
+
+      err = capsys.readouterr().err
+      assert rc == 2
+      assert "simulated write failure" in err
+      self.AssertFilesUnchanged(files, originals)
