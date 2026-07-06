@@ -668,6 +668,97 @@ class TestRenameAttributeSkeletonCli:
       assert rc == 2
       assert "unknown_receiver" in data["blocked_reasons"]
 
+   def TestDoesNotEditStringLiteralOrComment(self, tmp_path, capsys):
+      f = Write(
+         tmp_path / "repo.py",
+         'class Repo:\n   tableName = "x"\n\ndef Run():\n   repo = Repo()\n   text = "tableName"\n   # tableName should stay in comments\n   return repo.tableName\n',
+      )
+
+      rc = Run(
+         "rename-attribute", str(f), "--class", "Repo",
+         "--name", "tableName", "--to", "TableName", "--diff",
+      )
+
+      out = capsys.readouterr().out
+      assert rc == 0
+      assert '-   text = "tableName"' not in out
+      assert '-   # tableName should stay in comments' not in out
+      assert '+   return repo.TableName' in out
+
+   def TestUnrelatedAttributeSameSpellingBlocks(self, tmp_path, capsys):
+      f = Write(
+         tmp_path / "repo.py",
+         'class Repo:\n   tableName = "x"\n\nclass Other:\n   tableName = "y"\n\ndef Run():\n   repo = Repo()\n   other = Other()\n   return repo.tableName + other.tableName\n',
+      )
+
+      rc = Run(
+         "rename-attribute", str(f), "--class", "Repo",
+         "--name", "tableName", "--to", "TableName", "--diff",
+      )
+
+      out = capsys.readouterr().out
+      assert rc == 2
+      data = json.loads(out)
+      assert data["eligible_for_diff"] is False
+      assert "multiple_candidate_owners" in data["blocked_reasons"]
+
+   def TestDuplicateRefsDoNotDuplicateDeclarationEdits(self, tmp_path, capsys):
+      f = Write(
+         tmp_path / "repo.py",
+         'class Repo:\n   tableName = "x"\n\ndef Run():\n   repo = Repo()\n   return repo.tableName + repo.tableName\n',
+      )
+
+      rc = Run(
+         "rename-attribute", str(f), "--class", "Repo",
+         "--name", "tableName", "--to", "TableName", "--diff",
+      )
+
+      out = capsys.readouterr().out
+      assert rc == 0
+      assert out.count('-   tableName = "x"') == 1
+      assert out.count('+   TableName = "x"') == 1
+
+   def TestInvalidToRefusedBeforeRendering(self, tmp_path, capsys):
+      f = self.WriteRepoProject(tmp_path)
+
+      rc = Run(
+         "rename-attribute", str(f), "--class", "Repo",
+         "--name", "tableName", "--to", "Table-Name", "--diff",
+      )
+
+      captured = capsys.readouterr()
+      assert rc == 2
+      assert "--to must be a valid identifier" in captured.err
+      assert captured.out == ""
+
+   def TestInvalidClassRefusedBeforeRendering(self, tmp_path, capsys):
+      f = self.WriteRepoProject(tmp_path)
+
+      rc = Run(
+         "rename-attribute", str(f), "--class", "pkg.Repo",
+         "--name", "tableName", "--to", "TableName", "--diff",
+      )
+
+      captured = capsys.readouterr()
+      assert rc == 2
+      assert "--class must be a valid simple class name" in captured.err
+      assert captured.out == ""
+
+   def TestSpacedAttributeSyntaxIsRejected(self, tmp_path, capsys):
+      f = Write(
+         tmp_path / "repo.py",
+         'class Repo:\n   tableName = "x"\n\ndef Run():\n   repo = Repo()\n   return repo . tableName\n',
+      )
+
+      rc = Run(
+         "rename-attribute", str(f), "--class", "Repo",
+         "--name", "tableName", "--to", "TableName", "--diff",
+      )
+
+      err = capsys.readouterr().err
+      assert rc == 2
+      assert "planned attribute edit expected" in err
+
    def TestRejectsApplyAndDoesNotWrite(self, tmp_path, capsys):
       f = self.WriteRepoProject(tmp_path)
       original = f.read_text(encoding="utf-8")

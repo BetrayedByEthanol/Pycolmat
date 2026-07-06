@@ -384,15 +384,21 @@ and requires `--symbol PATH:LINE:COL`.
 customfmt rename-attribute src/ --class Repo --name tableName --to TableName --diff
 ```
 
-`customfmt rename-attribute --diff` performs Phase 4G guarded
-eligibility checks and, when eligible, renders a unified diff without writing
-files. It validates that the caller provided an explicit owner class with
-`--class`, the old attribute spelling with `--name`, the new attribute spelling
-with `--to`, and the read-only `--diff` mode. Blocked plans report JSON
+`customfmt rename-attribute --diff` performs Phase 4H guarded
+eligibility checks and, when eligible, renders a non-empty unified diff without
+writing files. It validates that the caller provided an explicit owner class
+with `--class`, the old attribute spelling with `--name`, the new attribute
+spelling with `--to`, and the read-only `--diff` mode. `--class` must be a
+valid simple Python class identifier for now; `--name` and `--to` must be valid
+Python identifiers. Invalid identifiers are rejected with exit 2 before
+planning or rendering. Blocked plans report JSON
 containing `requested_class`, `name`, `new_name`, `eligible_for_diff`,
 `object_attribute_plan`, `blocked_reasons`, and `status`, then exit 2. Eligible
 plans render token-based declaration/read/write edits only; strings, comments,
-dynamic helpers, `__dict__`, and unrelated attributes are not edited.
+dynamic helpers, `__dict__`, and unrelated attributes are not edited. If an
+internal eligible plan would render an empty diff, the command exits 2 instead
+of treating that as success. Weird spaced attribute syntax such as
+`repo . tableName` is not supported by the diff renderer.
 
 Object-attribute apply behavior is intentionally not implemented. `--apply`
 exits 2 and writes nothing. The eligibility check exits 0 only when diagnostics
