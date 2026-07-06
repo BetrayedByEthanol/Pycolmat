@@ -400,15 +400,36 @@ internal eligible plan would render an empty diff, the command exits 2 instead
 of treating that as success. Weird spaced attribute syntax such as
 `repo . tableName` is not supported by the diff renderer.
 
-Object-attribute apply behavior is intentionally not implemented. `--apply`
-exits 2 and writes nothing. The eligibility check exits 0 only when diagnostics
-prove a complete project-wide plan: declaration found on the explicit owner
-class, all reads and writes resolved to that requested owner, no dynamic refs,
-no unresolved refs, no external refs, no future-mode owner, no inherited
+Object-attribute apply behavior is intentionally not implemented. The future
+command form is:
+
+```bash
+customfmt rename-attribute <root> --class Repo --name tableName --to TableName --apply
+```
+
+Status: this command is still refused until Phase 4J. `--apply` exits 2 and
+writes nothing for safe same-file plans, imported multi-file plans, blocked
+plans, and invalid identifiers. `rename-attribute` must not support
+`--allow-incomplete`. The eligibility check exits 0 only when diagnostics prove
+a complete project-wide plan: declaration found on the explicit owner class, all
+reads and writes resolved to that requested owner, no dynamic refs, no
+unresolved refs, no external refs, no future-mode owner, no inherited
 attributes, no multiple candidate owners, and no collision with the new name.
 StatementComposer-style
 `repo`/`model`/`condition` fields remain blocked without proven declarations.
-Apply-capable object attribute mode must land separately after diff-only support is reviewable.
+
+Future apply-capable object attribute mode must land separately after diff-only
+support is reviewable. Its apply contract is deliberately stricter than simple
+write-through rendering:
+
+* Apply must reuse the exact same token plan as `--diff`.
+* Apply must render all affected files in memory before writing any file.
+* Apply must run `ast.parse` on every rendered file.
+* Apply must reject overlapping edits.
+* Apply must reject an empty rendered plan.
+* Apply must write files only after full validation succeeds.
+* Apply must roll back if any partial write failure occurs.
+* Apply must not support `--allow-incomplete`.
 
 #### `rename-symbol` v1 workflow examples
 
