@@ -490,6 +490,29 @@ must not call the local
 `customfmt rename` planner, must not broaden `rename-symbol`, and must not use
 text replacement.
 
+
+### Phase 4H rename-attribute diff-renderer hardening
+
+Phase 4H hardens the read-only `rename-attribute --diff` renderer before any
+write-capable mode exists. It does not implement `--apply`, does not write
+files, does not broaden `customfmt rename`, and does not remove the strict
+statementComposer golden xfail.
+
+The CLI validates all spelling inputs before planning or rendering:
+
+* `--name` must be a valid Python identifier.
+* `--to` must be a valid Python identifier.
+* `--class` must be a valid simple Python class identifier; dotted or otherwise
+  qualified class names remain out of scope for now.
+
+Invalid spelling inputs exit 2 with a user-facing error. Eligible plans must
+render a non-empty unified diff; if `eligible_for_diff` is true but the renderer
+produces no diff, the command exits 2 with an internal-plan error. The renderer
+remains token-position based, so string literals and comments containing the old
+attribute spelling are not edited. Weird spaced attribute syntax such as
+`repo . tableName` is explicitly unsupported by the current diff renderer and
+causes a guarded renderer error rather than a write.
+
 #### Diff eligibility contract
 
 A future `rename-attribute --diff` renderer may render a unified diff only

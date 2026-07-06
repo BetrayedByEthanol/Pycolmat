@@ -35,6 +35,7 @@ import ast
 import difflib
 import io
 import json
+import keyword
 import re
 import sys
 import textwrap
@@ -806,6 +807,13 @@ def _CmdRenameAttribute(args: argparse.Namespace) -> int:
       )
       return 2
 
+   identifier_error = _RenameAttributeIdentifierError(
+      args.owner_class, args.name, args.new_name
+   )
+   if identifier_error:
+      print(f"customfmt: error: {identifier_error}", file=sys.stderr)
+      return 2
+
    if args.apply:
       print(
          "customfmt: error: rename-attribute apply is not implemented; "
@@ -849,14 +857,41 @@ def _CmdRenameAttribute(args: argparse.Namespace) -> int:
       return 2
 
    try:
-      print(_RenderRenameAttributeDiff(
+      rendered_diff = _RenderRenameAttributeDiff(
          eligibility["object_attribute_plan"], args.name, args.new_name
-      ), end="")
+      )
+      if not rendered_diff:
+         print(
+            "customfmt: error: internal rename-attribute plan error: "
+            "eligible_for_diff was true but rendered diff was empty",
+            file=sys.stderr,
+         )
+         return 2
+      print(rendered_diff, end="")
    except (OSError, UnicodeDecodeError, ValueError, SyntaxError) as exc:
       print(f"customfmt: error: {exc}", file=sys.stderr)
       return 2
    return 0
 
+
+
+def _RenameAttributeIdentifierError(
+   requested_class: str, name: str, new_name: str
+) -> str | None:
+   if not _IsValidIdentifier(name):
+      return f"rename-attribute --name must be a valid identifier: {name!r}"
+   if not _IsValidIdentifier(new_name):
+      return f"rename-attribute --to must be a valid identifier: {new_name!r}"
+   if not _IsValidIdentifier(requested_class):
+      return (
+         "rename-attribute --class must be a valid simple class name: "
+         f"{requested_class!r}"
+      )
+   return None
+
+
+def _IsValidIdentifier(value: str) -> bool:
+   return value.isidentifier() and not keyword.iskeyword(value)
 
 
 def _RenderRenameAttributeDiff(
