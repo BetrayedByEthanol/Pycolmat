@@ -1084,8 +1084,14 @@ def _RenameAttributeEligibility(
       if "requested_class_mismatch" not in blocked_reasons:
          blocked_reasons.append("requested_class_mismatch")
 
+   if name == new_name:
+      blocked_reasons.append("no_op_rename")
+
    if _RenameAttributeHasOwnerDeclaration(paths, requested_class, new_name):
       blocked_reasons.append("new_name_collision")
+
+   if _RenameAttributeOwnerDeclarationCount(paths, requested_class, name) > 1:
+      blocked_reasons.append("multiple_candidate_owners")
 
    blocked_reasons = sorted(set(blocked_reasons))
    eligible = not blocked_reasons
@@ -1117,17 +1123,24 @@ def _RenameAttributeResolvedOwners(object_attribute_plan: dict) -> set[str]:
 def _RenameAttributeHasOwnerDeclaration(
    paths: list[str], requested_class: str, new_name: str
 ) -> bool:
-   result, disc_errors = FindRefsByName(paths, new_name)
+   return _RenameAttributeOwnerDeclarationCount(paths, requested_class, new_name) > 0
+
+
+def _RenameAttributeOwnerDeclarationCount(
+   paths: list[str], requested_class: str, attribute_name: str
+) -> int:
+   result, disc_errors = FindRefsByName(paths, attribute_name)
    if result is None or disc_errors:
-      return False
+      return 0
+   count = 0
    for defn in result.ToDict().get("definitions", []):
       if (
          defn.get("kind") == "class_declaration"
-         and defn.get("name") == new_name
+         and defn.get("name") == attribute_name
          and defn.get("scope") == requested_class
       ):
-         return True
-   return False
+         count += 1
+   return count
 
 
 def _WriteRenderedPlanFiles(rendered_by_file: dict[Path, str]) -> None:

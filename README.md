@@ -394,7 +394,10 @@ spelling with `--name`, the new attribute spelling with `--to`, and either
 `--diff` or `--apply`. `--class` must be a
 valid simple Python class identifier for now; `--name` and `--to` must be valid
 Python identifiers. Invalid identifiers are rejected with exit 2 before
-planning or rendering. Blocked plans report JSON
+planning or rendering. Because the owner selector is currently only a simple
+class name, projects containing multiple eligible classes with the same simple
+owner name are blocked rather than guessed; a future `--owner-symbol` or
+qualified-owner selector may lift that limitation. Blocked plans report JSON
 containing `requested_class`, `name`, `new_name`, `eligible_for_diff`,
 `object_attribute_plan`, `blocked_reasons`, and `status`, then exit 2. Eligible
 plans render token-based declaration/read/write edits only; strings, comments,
@@ -409,8 +412,8 @@ blocked rather than partially applied. The eligibility check exits 0 only when
 diagnostics prove a complete project-wide plan: declaration found on the
 explicit owner class, all reads and writes resolved to that requested owner, no
 dynamic refs, no unresolved refs, no external refs, no future-mode owner, no
-inherited attributes, no multiple candidate owners, and no collision with the
-new name.
+inherited attributes, no multiple candidate owners, no no-op rename, and no
+collision with the new name.
 StatementComposer-style
 `repo`/`model`/`condition` fields remain blocked without proven declarations.
 
