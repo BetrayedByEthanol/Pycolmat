@@ -417,6 +417,23 @@ collision with the new name.
 StatementComposer-style
 `repo`/`model`/`condition` fields remain blocked without proven declarations.
 
+Recommended operational workflow:
+
+1. Run `customfmt refs src/ --name tableName --pretty` first.
+2. Inspect the `object_attribute_plan`, especially `status`,
+   `declaration_found`, `complete`, `resolved_read_refs`,
+   `resolved_write_refs`, and `blocked_reasons`.
+3. Run `customfmt rename-attribute src/ --class Repo --name tableName --to TableName --diff`.
+4. Apply only after the refs diagnostics and unified diff match the intended
+   token edits:
+   `customfmt rename-attribute src/ --class Repo --name tableName --to TableName --apply`.
+
+The current owner selector limitation is intentional: `--class Repo` is a
+simple-name selector only. If more than one candidate owner class has that
+simple name, `rename-attribute` blocks instead of choosing one. Future work may
+add an exact owner selector such as `--owner-symbol path.py:line:col` or a
+qualified owner selector.
+
 Apply is deliberately stricter than simple write-through rendering:
 
 * Apply must reuse the exact same token plan as `--diff`.

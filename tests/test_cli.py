@@ -853,6 +853,139 @@ class TestRenameAttributeSkeletonCli:
       assert 'text = "tableName"' in text
       assert "return repo.TableName" in text
 
+   def TestEndToEndRefsDiffApplySmoke(self, tmp_path, capsys):
+      pkg = tmp_path / "pkg"
+      pkg.mkdir()
+      Write(pkg / "__init__.py", "")
+      repo_file = Write(pkg / "repos.py", 'class Repo:\n   tableName = "x"\n')
+      main_file = Write(
+         pkg / "main.py",
+         (
+            "from pkg.repos import Repo\n"
+            "\n"
+            "def Run():\n"
+            "   repo = Repo()\n"
+            "   # tableName must stay in this comment\n"
+            "   text = \"tableName must stay in this string\"\n"
+            "   value = repo.tableName\n"
+            "   repo.tableName = value\n"
+            "   return text, value\n"
+         ),
+      )
+
+      refs_rc = Run("refs", str(pkg), "--name", "tableName", "--pretty")
+      refs_data = json.loads(capsys.readouterr().out)
+
+      assert refs_rc == 0
+      assert refs_data["object_attribute_plan"]["status"] == "read-only complete"
+      assert refs_data["object_attribute_plan"]["complete"] is True
+      assert refs_data["object_attribute_plan"]["declaration_found"] is True
+      assert len(refs_data["object_attribute_plan"]["resolved_read_refs"]) == 1
+      assert len(refs_data["object_attribute_plan"]["resolved_write_refs"]) == 1
+
+      diff_rc = Run(
+         "rename-attribute", str(pkg), "--class", "Repo",
+         "--name", "tableName", "--to", "TableName", "--diff",
+      )
+      diff_out = capsys.readouterr().out
+
+      assert diff_rc == 0
+      assert '-   tableName = "x"' in diff_out
+      assert '+   TableName = "x"' in diff_out
+      assert "-   value = repo.tableName" in diff_out
+      assert "+   value = repo.TableName" in diff_out
+      assert "-   repo.tableName = value" in diff_out
+      assert "+   repo.TableName = value" in diff_out
+
+      apply_rc = Run(
+         "rename-attribute", str(pkg), "--class", "Repo",
+         "--name", "tableName", "--to", "TableName", "--apply",
+      )
+      apply_out = capsys.readouterr().out
+
+      assert apply_rc == 0
+      assert f"renamed-attribute {repo_file}" in apply_out
+      assert f"renamed-attribute {main_file}" in apply_out
+      assert repo_file.read_text(encoding="utf-8") == 'class Repo:\n   TableName = "x"\n'
+      assert main_file.read_text(encoding="utf-8") == (
+         "from pkg.repos import Repo\n"
+         "\n"
+         "def Run():\n"
+         "   repo = Repo()\n"
+         "   # tableName must stay in this comment\n"
+         "   text = \"tableName must stay in this string\"\n"
+         "   value = repo.TableName\n"
+         "   repo.TableName = value\n"
+         "   return text, value\n"
+      )
+
+   def TestStatementComposerStyleRepoTableNameSmokeBlocks(self, tmp_path, capsys):
+      f = Write(
+         tmp_path / "statement_composer.py",
+         (
+            "def Compose(repo):\n"
+            "   # tableName is repository metadata but the owner is unproven.\n"
+            "   return repo.tableName\n"
+         ),
+      )
+      original = f.read_text(encoding="utf-8")
+
+      rc = Run(
+         "rename-attribute", str(f), "--class", "Repo",
+         "--name", "tableName", "--to", "TableName", "--diff",
+      )
+
+      data = json.loads(capsys.readouterr().out)
+      assert rc == 2
+      assert "missing_declaration" in data["blocked_reasons"]
+      assert "unknown_receiver" in data["blocked_reasons"]
+      assert f.read_text(encoding="utf-8") == original
+
+   @pytest.mark.parametrize(
+      "source",
+      [
+         'from dataclasses import dataclass\n\n@dataclass\nclass Repo:\n   tableName: str\n\ndef Run():\n   repo = Repo("x")\n   return repo.tableName\n',
+         'class BaseModel:\n   pass\n\nclass Repo(BaseModel):\n   tableName: str\n\ndef Run():\n   repo = Repo()\n   return repo.tableName\n',
+      ],
+   )
+   def TestDataclassAndModelLikeOwnerSmokeBlocks(self, tmp_path, capsys, source):
+      f = Write(tmp_path / "models.py", source)
+      original = f.read_text(encoding="utf-8")
+
+      rc = Run(
+         "rename-attribute", str(f), "--class", "Repo",
+         "--name", "tableName", "--to", "TableName", "--diff",
+      )
+
+      data = json.loads(capsys.readouterr().out)
+      assert rc == 2
+      assert "future_mode_owner" in data["blocked_reasons"]
+      assert f.read_text(encoding="utf-8") == original
+
+   def TestDuplicateSimpleClassNameSmokeBlocks(self, tmp_path, capsys):
+      pkg = tmp_path / "pkg"
+      pkg.mkdir()
+      a = Write(
+         pkg / "a.py",
+         'class Repo:\n   tableName = "a"\n\ndef RunA():\n   repo = Repo()\n   return repo.tableName\n',
+      )
+      b = Write(
+         pkg / "b.py",
+         'class Repo:\n   tableName = "b"\n\ndef RunB():\n   repo = Repo()\n   return repo.tableName\n',
+      )
+      originals = {a: a.read_text(encoding="utf-8"), b: b.read_text(encoding="utf-8")}
+
+      rc = Run(
+         "rename-attribute", str(pkg), "--class", "Repo",
+         "--name", "tableName", "--to", "TableName", "--diff",
+      )
+
+      data = json.loads(capsys.readouterr().out)
+      assert rc == 2
+      assert "multiple_candidate_owners" in data["blocked_reasons"]
+      assert a.read_text(encoding="utf-8") == originals[a]
+      assert b.read_text(encoding="utf-8") == originals[b]
+
    def TestBlockedUnknownReceiverApplyRefusesAndDoesNotWrite(self, tmp_path, capsys):
       f = Write(
          tmp_path / "repo.py",
