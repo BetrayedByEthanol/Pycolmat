@@ -944,6 +944,112 @@ class TestRenameAttributeSkeletonCli:
       assert captured.out == ""
       assert f.read_text(encoding="utf-8") == original
 
+
+   def TestDuplicateSimpleOwnerNamesBlockApplyAndWriteNothing(self, tmp_path, capsys):
+      pkg = tmp_path / "pkg"
+      pkg.mkdir()
+      a = Write(
+         pkg / "a.py",
+         'class Repo:\n   tableName = "a"\n\ndef RunA():\n   repo = Repo()\n   return repo.tableName\n',
+      )
+      b = Write(
+         pkg / "b.py",
+         'class Repo:\n   tableName = "b"\n\ndef RunB():\n   repo = Repo()\n   return repo.tableName\n',
+      )
+      originals = {a: a.read_text(encoding="utf-8"), b: b.read_text(encoding="utf-8")}
+
+      rc = Run(
+         "rename-attribute", str(pkg), "--class", "Repo",
+         "--name", "tableName", "--to", "TableName", "--apply",
+      )
+
+      out = capsys.readouterr().out
+      assert rc == 2
+      assert "multiple_candidate_owners" in out
+      assert a.read_text(encoding="utf-8") == originals[a]
+      assert b.read_text(encoding="utf-8") == originals[b]
+
+   def TestDiffApplyParitySafeSameFile(self, tmp_path, capsys):
+      source = (
+         'class Repo:\n   tableName = "x"\n\ndef Run():\n'
+         '   repo = Repo()\n   value = repo.tableName\n   repo.tableName = value\n'
+      )
+      diff_file = Write(tmp_path / "diff_repo.py", source)
+
+      diff_rc = Run(
+         "rename-attribute", str(diff_file), "--class", "Repo",
+         "--name", "tableName", "--to", "TableName", "--diff",
+      )
+
+      diff_out = capsys.readouterr().out
+      assert diff_rc == 0
+      assert '-   tableName = "x"' in diff_out
+      assert '+   TableName = "x"' in diff_out
+      assert '-   value = repo.tableName' in diff_out
+      assert '+   value = repo.TableName' in diff_out
+      assert '-   repo.tableName = value' in diff_out
+      assert '+   repo.TableName = value' in diff_out
+
+      apply_file = Write(tmp_path / "apply_repo.py", source)
+      apply_rc = Run(
+         "rename-attribute", str(apply_file), "--class", "Repo",
+         "--name", "tableName", "--to", "TableName", "--apply",
+      )
+
+      assert apply_rc == 0
+      assert apply_file.read_text(encoding="utf-8") == (
+         'class Repo:\n   TableName = "x"\n\ndef Run():\n'
+         '   repo = Repo()\n   value = repo.TableName\n   repo.TableName = value\n'
+      )
+
+   def TestNoOpRenameBlocksAndWritesNothing(self, tmp_path, capsys):
+      f = self.WriteRepoProject(tmp_path)
+      original = f.read_text(encoding="utf-8")
+
+      rc = Run(
+         "rename-attribute", str(f), "--class", "Repo",
+         "--name", "tableName", "--to", "tableName", "--apply",
+      )
+
+      out = capsys.readouterr().out
+      assert rc == 2
+      assert "no_op_rename" in out
+      assert f.read_text(encoding="utf-8") == original
+
+   def TestNewNameCollisionApplyBlocksBeforeWriting(self, tmp_path, capsys):
+      f = Write(
+         tmp_path / "repo.py",
+         'class Repo:\n   tableName = "x"\n   TableName = "y"\n\ndef Run():\n   repo = Repo()\n   return repo.tableName\n',
+      )
+      original = f.read_text(encoding="utf-8")
+
+      rc = Run(
+         "rename-attribute", str(f), "--class", "Repo",
+         "--name", "tableName", "--to", "TableName", "--apply",
+      )
+
+      out = capsys.readouterr().out
+      assert rc == 2
+      assert "new_name_collision" in out
+      assert f.read_text(encoding="utf-8") == original
+
+   def TestMixedSafeAndDynamicRefsApplyBlocksAndWritesNothing(self, tmp_path, capsys):
+      f = Write(
+         tmp_path / "repo.py",
+         'class Repo:\n   tableName = "x"\n\ndef Run():\n   repo = Repo()\n   safe = repo.tableName\n   dynamic = getattr(repo, "tableName")\n   return safe, dynamic\n',
+      )
+      original = f.read_text(encoding="utf-8")
+
+      rc = Run(
+         "rename-attribute", str(f), "--class", "Repo",
+         "--name", "tableName", "--to", "TableName", "--apply",
+      )
+
+      out = capsys.readouterr().out
+      assert rc == 2
+      assert "dynamic_attribute_helper" in out
+      assert f.read_text(encoding="utf-8") == original
+
    def TestWriteFailureApplyRollsBackPartialWrites(self, tmp_path, capsys, monkeypatch):
       pkg, files = self.WriteImportedRepoProject(tmp_path)
       originals = {f: f.read_text(encoding="utf-8") for f in files}
@@ -963,7 +1069,8 @@ class TestRenameAttributeSkeletonCli:
          "--name", "tableName", "--to", "TableName", "--apply",
       )
 
-      err = capsys.readouterr().err
+      captured = capsys.readouterr()
       assert rc == 2
-      assert "simulated write failure" in err
+      assert "simulated write failure" in captured.err
+      assert "renamed-attribute" not in captured.out
       self.AssertFilesUnchanged(files, originals)
